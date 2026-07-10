@@ -805,7 +805,6 @@ class HomePageState extends ConsumerState<HomePage> with RouteAware {
                         telemetrySource:
                             TelemetryBookDetailSources.homeContinueReading,
                       ),
-                      heroTransition: true,
                     ).then((_) {
                       _loadReadingStats();
                       _fetchContinueReading(internalLoading: false);
@@ -816,7 +815,7 @@ class HomePageState extends ConsumerState<HomePage> with RouteAware {
                     child: Row(
                       children: [
                         // 封面
-                        Hero(
+                        BookCoverHero(
                           tag: 'continue_reading_${book.id}',
                           // 冷启动首次点击时，详情页封面可能仍在占位阶段。
                           // 这里 push 阶段强制使用来源 Hero（首页侧）作为飞行物，
@@ -1211,7 +1210,6 @@ class HomePageState extends ConsumerState<HomePage> with RouteAware {
             heroTag: heroTag,
             telemetrySource: telemetrySource,
           ),
-          heroTransition: true,
         ).then((_) {
           _loadReadingStats();
           _fetchContinueReading(internalLoading: false);
@@ -1221,7 +1219,7 @@ class HomePageState extends ConsumerState<HomePage> with RouteAware {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Expanded(
-            child: Hero(
+            child: BookCoverHero(
               tag: heroTag,
               child: BookCoverCard(
                 coverUrl: book.cover,

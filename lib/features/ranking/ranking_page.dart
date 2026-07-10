@@ -249,14 +249,13 @@ class _RankingPageState extends ConsumerState<RankingPage>
             heroTag: heroTag,
             telemetrySource: TelemetryBookDetailSources.ranking,
           ),
-          heroTransition: true,
         );
       },
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Expanded(
-            child: Hero(
+            child: BookCoverHero(
               tag: heroTag,
               child: BookCoverCard(
                 coverUrl: book.cover,

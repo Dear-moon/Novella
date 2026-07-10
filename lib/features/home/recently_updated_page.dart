@@ -250,14 +250,13 @@ class _RecentlyUpdatedPageState extends ConsumerState<RecentlyUpdatedPage> {
             heroTag: heroTag,
             telemetrySource: TelemetryBookDetailSources.homeRecentlyUpdated,
           ),
-          heroTransition: true,
         );
       },
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Expanded(
-            child: Hero(
+            child: BookCoverHero(
               tag: heroTag,
               child: BookCoverCard(
                 coverUrl: book.cover,
