@@ -1,0 +1,939 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import test from 'node:test';
+
+import {
+  COMMUNITY_STORAGE_KEYS,
+  CommunitySpeechBlockedError,
+  CommunitySpeechRulesUnavailableError,
+  createBookSearchUseCase,
+  createClientSessionController,
+  createCommunitySpeechGuard,
+  createCommunityUseCase,
+  createDiscoveryUseCase,
+  createHistoryUseCase,
+  createNotificationsUseCase,
+  createProfileUseCase,
+  createReaderUseCase,
+  createShelfDraft,
+  createShelfFolder,
+  createShelfUseCase,
+  deleteShelfFolder,
+  getShelfFolderPaths,
+  getShelfItemsAtPath,
+  getShelfSelectionBookCount,
+  moveShelfBooks,
+  normalizeCommunitySpeechText,
+  parseAvatarSource,
+  removeShelfItems,
+  renameShelfFolder,
+  reorderShelfSiblings,
+  resolveAvatarUrl,
+  shelfDraftHasChanges,
+  shelfItemKey,
+} from './index.ts';
+
+class FakeLifecycle {
+  state = 'foreground';
+  listeners = new Set();
+
+  getCurrentState() {
+    return this.state;
+  }
+
+  subscribe(listener) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  emit(state) {
+    this.state = state;
+    for (const listener of this.listeners) listener(state);
+  }
+}
+
+class FakeSignalR {
+  connectCalls = 0;
+  closeCalls = 0;
+  invokeCalls = 0;
+  connectImplementation = async () => undefined;
+
+  async connect() {
+    this.connectCalls += 1;
+    await this.connectImplementation();
+  }
+
+  async close() {
+    this.closeCalls += 1;
+  }
+
+  async invoke(methodName, args) {
+    this.invokeCalls += 1;
+    return { methodName, args };
+  }
+}
+
+test('client startup bootstraps auth before one shared SignalR connection', async () => {
+  const order = [];
+  const lifecycle = new FakeLifecycle();
+  const signalR = new FakeSignalR();
+  signalR.connectImplementation = async () => {
+    order.push('connect');
+  };
+  const session = createClientSessionController({
+    async bootstrapAuthentication() {
+      order.push('auth');
+    },
+    async refreshAuthentication() {
+      return true;
+    },
+    lifecycle,
+    signalR,
+  });
+
+  const first = session.start();
+  const second = session.start();
+  assert.equal(first, second);
+  assert.deepEqual(await first, { status: 'ready', error: null });
+  assert.deepEqual(order, ['auth', 'connect']);
+  assert.equal(signalR.connectCalls, 1);
+
+  await session.close();
+});
+
+test('startup re-reads lifecycle state before deciding whether to connect', async () => {
+  const lifecycle = new FakeLifecycle();
+  lifecycle.state = 'background';
+  const signalR = new FakeSignalR();
+  const session = createClientSessionController({
+    async bootstrapAuthentication() { return false; },
+    async refreshAuthentication() { return false; },
+    lifecycle,
+    signalR,
+  });
+
+  lifecycle.state = 'foreground';
+  assert.deepEqual(await session.start(), { status: 'ready', error: null });
+  assert.equal(signalR.connectCalls, 1);
+
+  await session.close();
+});
+
+test('a never-settling connection attempt releases startup as degraded', async () => {
+  const lifecycle = new FakeLifecycle();
+  const signalR = new FakeSignalR();
+  signalR.connectImplementation = () => new Promise(() => undefined);
+  const session = createClientSessionController({
+    async bootstrapAuthentication() { return true; },
+    async refreshAuthentication() { return true; },
+    lifecycle,
+    signalR,
+    connectionTimeoutMilliseconds: 5,
+  });
+
+  const result = await session.start();
+  assert.equal(result.status, 'degraded');
+  assert.match(result.error.message, /timed out/i);
+  assert.equal(signalR.closeCalls, 1);
+
+  await session.close();
+});
+
+test('degraded startup releases the invocation gate after the connection attempt', async () => {
+  const lifecycle = new FakeLifecycle();
+  const signalR = new FakeSignalR();
+  const connectionError = new Error('offline');
+  signalR.connectImplementation = async () => {
+    throw connectionError;
+  };
+  const session = createClientSessionController({
+    async bootstrapAuthentication() {},
+    async refreshAuthentication() {
+      return false;
+    },
+    lifecycle,
+    signalR,
+  });
+
+  assert.deepEqual(await session.start(), {
+    status: 'degraded',
+    error: connectionError,
+  });
+  const response = await session.transport.invoke('GetOnlineInfo', []);
+  assert.deepEqual(response, { methodName: 'GetOnlineInfo', args: [] });
+
+  await session.close();
+});
+
+test('background waits for registered reader persistence before closing SignalR', async () => {
+  const lifecycle = new FakeLifecycle();
+  const signalR = new FakeSignalR();
+  const persisted = deferred();
+  const session = createClientSessionController({
+    async bootstrapAuthentication() { return true; },
+    async refreshAuthentication() { return true; },
+    lifecycle,
+    signalR,
+    backgroundDrainTimeoutMilliseconds: 100,
+  });
+  await session.start();
+  session.registerBeforeBackground(() => persisted.promise);
+
+  lifecycle.emit('background');
+  await nextTask();
+  assert.equal(signalR.closeCalls, 0);
+
+  persisted.resolve();
+  await nextTask();
+  assert.equal(signalR.closeCalls, 1);
+
+  await session.close();
+});
+
+test('background closes the gate and foreground refreshes then reconnects before invoke', async () => {
+  const lifecycle = new FakeLifecycle();
+  const signalR = new FakeSignalR();
+  const refresh = deferred();
+  let refreshCalls = 0;
+  const session = createClientSessionController({
+    async bootstrapAuthentication() {},
+    async refreshAuthentication() {
+      refreshCalls += 1;
+      await refresh.promise;
+      return true;
+    },
+    lifecycle,
+    signalR,
+  });
+
+  await session.start();
+  lifecycle.emit('background');
+  await nextTask();
+  assert.equal(signalR.closeCalls, 1);
+
+  let invocationSettled = false;
+  const invocation = session.transport.invoke('GetLatestBookList', []).then(() => {
+    invocationSettled = true;
+  });
+  lifecycle.emit('foreground');
+  lifecycle.emit('foreground');
+  await nextTask();
+
+  assert.equal(refreshCalls, 1);
+  assert.equal(signalR.connectCalls, 1);
+  assert.equal(signalR.invokeCalls, 0);
+  assert.equal(invocationSettled, false);
+
+  refresh.resolve();
+  await invocation;
+  assert.equal(signalR.connectCalls, 2);
+  assert.equal(signalR.invokeCalls, 1);
+
+  await session.close();
+});
+
+test('reader preload marks chapter Hub work as cancellable preload priority', async () => {
+  const calls = [];
+  const useCase = createReaderUseCase({
+    async getNovelContent(request, options) {
+      calls.push([request, options]);
+      return {
+        chapter: {
+          id: 9,
+          bookId: request.bookId,
+          title: 'Chapter 2',
+          content: '<p>ready</p>',
+          fontUrl: null,
+          sortNum: request.sortNum,
+          chapterTitles: ['Chapter 1', 'Chapter 2'],
+          canEdit: false,
+        },
+        readPosition: null,
+      };
+    },
+  });
+  const controller = new AbortController();
+
+  await useCase.preloadChapter(
+    { bookId: 4, sortNum: 2, convert: 't2s' },
+    controller.signal,
+  );
+
+  assert.deepEqual(calls, [[
+    { bookId: 4, sortNum: 2, convert: 't2s' },
+    { priority: 'preload', signal: controller.signal },
+  ]]);
+});
+
+test('discovery exposes independently loadable home sections', async () => {
+  const calls = [];
+  const useCase = createDiscoveryUseCase({
+    async getLatestBookList(request) {
+      calls.push(['books', request]);
+      return { items: [], page: 1, totalPages: 0 };
+    },
+    async getAnnouncementList(request) {
+      calls.push(['announcements', request]);
+      return { items: [], page: 1, totalPages: 0 };
+    },
+    async getOnlineInfo() {
+      calls.push(['online']);
+      return { onlineUserCount: 1, dayCount: 2, dayRegister: 3 };
+    },
+  });
+
+  const [books, announcements, online] = await Promise.all([
+    useCase.loadLatestBooks(),
+    useCase.loadAnnouncements(),
+    useCase.loadOnlineInfo(),
+  ]);
+
+  assert.deepEqual(books.items, []);
+  assert.deepEqual(announcements.items, []);
+  assert.equal(online.onlineUserCount, 1);
+  assert.deepEqual(calls, [
+    ['books', { size: 6 }],
+    ['announcements', { page: 1, size: 5 }],
+    ['online'],
+  ]);
+});
+
+test('discovery loads paged novel catalog with the requested order', async () => {
+  const calls = [];
+  const useCase = createDiscoveryUseCase({
+    async getBookList(request) {
+      calls.push(request);
+      return { items: [], page: request.page, totalPages: 4 };
+    },
+  });
+
+  const page = await useCase.loadBookListPage({
+    page: 3,
+    order: 'view',
+    ignoreAI: true,
+    ignoreJapanese: false,
+  });
+
+  assert.equal(page.totalPages, 4);
+  assert.deepEqual(calls, [
+    { page: 3, size: 24, order: 'view', ignoreAI: true, ignoreJapanese: false },
+  ]);
+
+  await useCase.loadBookListPage({ page: 1, order: 'new' });
+  await useCase.loadBookListPage({ page: 1, order: 'latest' });
+  assert.deepEqual(calls.slice(1).map((call) => call.order), ['new', 'latest']);
+});
+
+test('discovery loads the paged comic catalog through GetComicList', async () => {
+  const calls = [];
+  const useCase = createDiscoveryUseCase({
+    async getComicList(request) {
+      calls.push(request);
+      return { items: [], page: request.page, totalPages: 3 };
+    },
+  });
+
+  const page = await useCase.loadComicListPage({ page: 2, order: 'new' });
+  assert.equal(page.totalPages, 3);
+  assert.deepEqual(calls, [{ page: 2, size: 24, order: 'new' }]);
+});
+
+test('discovery maps ranking periods to GetRank days', async () => {
+  const calls = [];
+  const useCase = createDiscoveryUseCase({
+    async getRank(days) {
+      calls.push(days);
+      return [{ id: 1, title: 'Top book' }];
+    },
+  });
+
+  const weekly = await useCase.loadRank('weekly');
+  assert.equal(weekly.length, 1);
+  assert.deepEqual(calls, [7]);
+
+  await useCase.loadRank('daily');
+  await useCase.loadRank('monthly');
+  assert.deepEqual(calls, [7, 1, 31]);
+
+  await assert.rejects(() => useCase.loadRank('hourly'), /unknown ranking period/i);
+});
+
+test('search keeps novel and comic requests equal and cancellable', async () => {
+  const calls = [];
+  const useCase = createBookSearchUseCase({
+    async searchNovelBooks(request, options) {
+      calls.push(['Novel', request, options]);
+      return { page: request.page, totalPages: 1, items: [] };
+    },
+    async searchComicSeries(request, options) {
+      calls.push(['Comic', request, options]);
+      return { page: request.page, totalPages: 1, items: [] };
+    },
+  });
+  const controller = new AbortController();
+  const request = { keywords: 'series', mode: 'name', page: 1, size: 24 };
+
+  await Promise.all([
+    useCase.searchNovels(request, controller.signal),
+    useCase.searchComics(request, controller.signal),
+  ]);
+
+  assert.deepEqual(calls, [
+    ['Novel', request, { signal: controller.signal }],
+    ['Comic', request, { signal: controller.signal }],
+  ]);
+});
+
+test('history hydrates novel order and comic series independently', async () => {
+  const useCase = createHistoryUseCase({
+    async getReadHistory() {
+      return { novelIds: [3, 2, 1], comicIds: [9, 8] };
+    },
+    async getBookListByIds(ids) {
+      return [...ids].reverse().map((id) => ({ id, title: `Book ${id}` }));
+    },
+    async getComicSeriesByIds() {
+      return {
+        page: 1,
+        totalPages: 1,
+        items: [
+          { id: 1, title: 'Series', chapterCount: 2 },
+          { id: 2, title: 'Series', chapterCount: 2 },
+        ],
+      };
+    },
+    async clearReadHistory() {},
+  });
+
+  assert.deepEqual(await useCase.loadIndex(), {
+    novelIds: [3, 2, 1],
+    comicIds: [9, 8],
+  });
+  const novels = await useCase.loadNovelPage([3, 2, 1], 1, 2);
+  assert.deepEqual(novels.items.map((item) => item.id), [3, 2]);
+  const comics = await useCase.loadComicPage([9, 8], 1, 24);
+  assert.equal(comics.items.length, 1);
+  await useCase.clear();
+});
+
+test('avatar sources round-trip Web-Master URL, QQ, and QQ group modes', () => {
+  assert.deepEqual(parseAvatarSource('https://cdn.example/avatar.png'), {
+    source: 'url',
+    value: 'https://cdn.example/avatar.png',
+  });
+  assert.deepEqual(parseAvatarSource('https://q.qlogo.cn/headimg_dl?spec=100&dst_uin=12345'), {
+    source: 'qq',
+    value: '12345',
+  });
+  assert.deepEqual(parseAvatarSource('https://p.qlogo.cn/gh/67890/67890/100'), {
+    source: 'qqGroup',
+    value: '67890',
+  });
+  assert.equal(resolveAvatarUrl('url', 'https://cdn.example/avatar.png'), 'https://cdn.example/avatar.png');
+  assert.equal(resolveAvatarUrl('qq', '12345'), 'https://q.qlogo.cn/headimg_dl?spec=100&dst_uin=12345');
+  assert.equal(resolveAvatarUrl('qqGroup', '67890'), 'https://p.qlogo.cn/gh/67890/67890/100');
+  assert.throws(() => resolveAvatarUrl('qq', '123'), /valid QQ number/);
+  assert.throws(() => resolveAvatarUrl('url', 'http://cdn.example/avatar.png'), /valid HTTPS/);
+});
+
+test('profile repository publishes refreshed avatar and check-in state', async () => {
+  let profile = {
+    id: 9,
+    userName: 'reader',
+    avatarUrl: '',
+    email: 'reader@example.com',
+    inviteCode: 'INVITE',
+    groupName: 'Member',
+    point: 0,
+    unreadNotificationCount: 0,
+    registeredAt: null,
+    growth: {
+      experience: 10,
+      level: 1,
+      growthLevel: 1,
+      currentLevelExperience: 0,
+      nextLevelExperience: 100,
+      signInStreak: 0,
+      signedToday: false,
+    },
+  };
+  const useCase = createProfileUseCase({
+    async getMyProfile() { return structuredClone(profile); },
+    async setAvatar(url) { profile = { ...profile, avatarUrl: url }; },
+    async checkIn() {
+      profile = {
+        ...profile,
+        growth: { ...profile.growth, experience: 15, signInStreak: 1, signedToday: true },
+      };
+      return { reward: 5, streak: 1, experience: 15, level: 1 };
+    },
+  });
+  const published = [];
+  useCase.subscribe((next) => published.push(next));
+
+  await useCase.load();
+  assert.equal(useCase.getSnapshot().id, 9);
+  await useCase.setAvatar('https://cdn.example/avatar.png');
+  assert.equal(useCase.getSnapshot().avatarUrl, 'https://cdn.example/avatar.png');
+  const outcome = await useCase.checkIn();
+  assert.equal(outcome.result.reward, 5);
+  assert.equal(outcome.profile.growth.signedToday, true);
+  assert.equal(useCase.getSnapshot().growth.signInStreak, 1);
+  assert.equal(published.length, 3);
+});
+
+test('shelf repository publishes one shared snapshot after load and save', async () => {
+  const saved = [];
+  const useCase = createShelfUseCase({
+    async getBookShelf() {
+      return {
+        version: '20220211',
+        items: [{ type: 'BOOK', id: 1, index: 0, parents: [], updatedAt: 'a' }],
+      };
+    },
+    async getBookListByIds(ids) {
+      return ids.map((id) => ({ id, title: `Book ${id}` }));
+    },
+    async saveBookShelf(draft) {
+      saved.push(draft);
+    },
+  });
+  const published = [];
+  const unsubscribe = useCase.subscribe((snapshot) => published.push(snapshot));
+
+  assert.equal(useCase.getSnapshot(), null);
+  const loaded = await useCase.load();
+  assert.equal(useCase.getSnapshot(), loaded);
+  assert.equal(published.length, 1);
+
+  const draft = createShelfFolder(createShelfDraft(loaded), {
+    id: 'folder',
+    title: 'Folder',
+    now: 'b',
+  });
+  const savedSnapshot = await useCase.save(draft);
+  assert.equal(useCase.getSnapshot(), savedSnapshot);
+  assert.equal(published.length, 2);
+  assert.deepEqual(saved[0].items.map(shelfItemKey), ['FOLDER:folder', 'BOOK:1']);
+
+  unsubscribe();
+  await useCase.load();
+  assert.equal(published.length, 2);
+});
+
+test('shelf load cannot publish an older response after save begins', async () => {
+  let resolveLoad;
+  let shelfCall = 0;
+  const useCase = createShelfUseCase({
+    async getBookShelf() {
+      shelfCall += 1;
+      if (shelfCall === 1) {
+        return { version: 'old', items: [
+          { type: 'BOOK', id: 1, index: 0, parents: [], updatedAt: 'a' },
+          { type: 'BOOK', id: 2, index: 1, parents: [], updatedAt: 'a' },
+        ] };
+      }
+      await new Promise((resolve) => { resolveLoad = resolve; });
+      return { version: 'server', items: [
+        { type: 'BOOK', id: 2, index: 0, parents: [], updatedAt: 'b' },
+        { type: 'BOOK', id: 1, index: 1, parents: [], updatedAt: 'b' },
+      ] };
+    },
+    async getBookListByIds(ids) {
+      return ids.map((id) => ({ id, title: `Book ${id}` }));
+    },
+    async saveBookShelf() {},
+  });
+
+  const initial = await useCase.load();
+  const staleLoad = useCase.load();
+  const draft = createShelfDraft(initial);
+  draft.items = [draft.items[1], draft.items[0]].map((item, index) => ({ ...item, index }));
+  const saved = await useCase.save(draft);
+  resolveLoad();
+  const loaded = await staleLoad;
+  assert.deepEqual(saved.items.map(shelfItemKey), ['BOOK:2', 'BOOK:1']);
+  assert.deepEqual(loaded.items.map(shelfItemKey), ['BOOK:2', 'BOOK:1']);
+  assert.deepEqual(useCase.getSnapshot().items.map(shelfItemKey), ['BOOK:2', 'BOOK:1']);
+});
+
+test('shelf dirty projection compares the complete ordered draft', () => {
+  const snapshot = {
+    version: '20220211',
+    books: [],
+    items: [
+      { type: 'FOLDER', id: 'folder', index: 0, parents: [], title: 'Folder', updatedAt: 'a' },
+      { type: 'BOOK', id: 1, index: 0, parents: ['folder'], updatedAt: 'a' },
+    ],
+  };
+  const clean = createShelfDraft(snapshot);
+  assert.equal(shelfDraftHasChanges(snapshot, clean), false);
+
+  const renamed = renameShelfFolder(clean, { id: 'folder', title: 'Renamed', now: 'b' });
+  assert.equal(shelfDraftHasChanges(snapshot, renamed), true);
+  assert.equal(shelfDraftHasChanges(snapshot, createShelfDraft(snapshot)), false);
+  assert.equal(shelfDraftHasChanges(snapshot, {
+    ...clean,
+    items: clean.items.map((item) => ({ ...item, updatedAt: 'metadata-only' })),
+  }), false);
+});
+
+test('shelf draft supports folders, moves, sibling reorder, and Web deletion semantics', () => {
+  const snapshot = {
+    version: '20220211',
+    books: [],
+    items: [
+      { type: 'BOOK', id: 1, index: 0, parents: [], updatedAt: 'a' },
+      { type: 'BOOK', id: 2, index: 1, parents: [], updatedAt: 'a' },
+    ],
+  };
+  let draft = createShelfDraft(snapshot);
+  draft = createShelfFolder(draft, { id: 'folder', title: 'Folder', now: 'b' });
+  draft = renameShelfFolder(draft, { id: 'folder', title: 'Renamed', now: 'c' });
+  draft = moveShelfBooks(draft, { bookIds: [2], destination: ['folder'], now: 'd' });
+
+  assert.deepEqual(
+    getShelfItemsAtPath(draft, ['folder']).map(shelfItemKey),
+    ['BOOK:2'],
+  );
+  assert.deepEqual(getShelfFolderPaths(draft), [{
+    id: 'folder',
+    label: 'Renamed',
+    path: ['folder'],
+  }]);
+  assert.equal(getShelfSelectionBookCount(draft, new Set(['FOLDER:folder'])), 1);
+  draft = reorderShelfSiblings(draft, {
+    parents: [],
+    orderedKeys: ['BOOK:1', 'FOLDER:folder'],
+    now: 'e',
+  });
+  assert.deepEqual(getShelfItemsAtPath(draft, []).map(shelfItemKey), [
+    'BOOK:1',
+    'FOLDER:folder',
+  ]);
+
+  draft = deleteShelfFolder(draft, { id: 'folder', now: 'f' });
+  assert.deepEqual(getShelfItemsAtPath(draft, []).map(shelfItemKey), [
+    'BOOK:1',
+    'BOOK:2',
+  ]);
+  draft = removeShelfItems(draft, {
+    keys: new Set(['BOOK:1']),
+    now: 'g',
+  });
+  assert.deepEqual(getShelfItemsAtPath(draft, []).map(shelfItemKey), ['BOOK:2']);
+});
+
+test('shelf draft rejects cross-container and incomplete reorder operations', () => {
+  const draft = createShelfDraft({
+    version: '20220211',
+    books: [],
+    items: [
+      { type: 'BOOK', id: 1, index: 0, parents: [], updatedAt: 'a' },
+      { type: 'FOLDER', id: 'folder', index: 1, parents: [], title: 'Folder', updatedAt: 'a' },
+    ],
+  });
+
+  assert.throws(() => reorderShelfSiblings(draft, {
+    parents: [],
+    orderedKeys: ['BOOK:1'],
+    now: 'b',
+  }), /every sibling/i);
+  assert.throws(() => moveShelfBooks(draft, {
+    bookIds: [1],
+    destination: ['missing'],
+    now: 'b',
+  }), /destination folder/i);
+});
+
+test('Community use case validates input, forwards cancellation, and gates speech mutations', async () => {
+  const calls = [];
+  const guardChecks = [];
+  const signal = new AbortController().signal;
+  const api = {
+    getCommunityHome(query, options) {
+      calls.push(['home', query, options]);
+      return Promise.resolve({ feed: [] });
+    },
+    getCommunityFeed(query, options) {
+      calls.push(['feed', query, options]);
+      return Promise.resolve({ feed: [] });
+    },
+    getCommunityThread(request, options) {
+      calls.push(['thread', request, options]);
+      return Promise.resolve(null);
+    },
+    getCommunityReplyChildren(request, options) {
+      calls.push(['children', request, options]);
+      return Promise.resolve({ items: [] });
+    },
+    getMyCommunityOverview(options) {
+      calls.push(['mine', options]);
+      return Promise.resolve({ publishedThreads: [] });
+    },
+    createCommunityThread(request) {
+      calls.push(['createThread', request]);
+      return Promise.resolve({ id: 5 });
+    },
+    createCommunityReply(request) {
+      calls.push(['createReply', request]);
+      return Promise.resolve({ id: 6 });
+    },
+    toggleCommunityThreadLike(id) {
+      calls.push(['threadLike', id]);
+      return Promise.resolve({ liked: true, likes: 1 });
+    },
+    toggleCommunityThreadFavorite(id) {
+      calls.push(['threadFavorite', id]);
+      return Promise.resolve({ favorited: true, favorites: 1 });
+    },
+    toggleCommunityReplyLike(id) {
+      calls.push(['replyLike', id]);
+      return Promise.resolve({ liked: true, likes: 1 });
+    },
+  };
+  const guard = {
+    async check(fields) {
+      guardChecks.push(fields);
+      return { type: 'allowed', revision: 1 };
+    },
+    getSnapshot() { return false; },
+    async isSpeechDisabled() { return false; },
+    subscribe() { return () => undefined; },
+  };
+  const useCase = createCommunityUseCase(api, guard);
+
+  await useCase.loadHome({ page: 1, size: 6 }, signal);
+  await useCase.loadFeed({ order: 'reply' }, signal);
+  await useCase.loadThread({ threadId: 3, replyPage: 1 }, signal);
+  await useCase.loadReplyChildren({ threadId: 3, parentReplyId: 4 }, signal);
+  await useCase.loadMyOverview(signal);
+  await useCase.createThread({
+    boardKey: ' general ',
+    subCategoryKey: ' news ',
+    title: '  Valid title  ',
+    contentText: '  This body is definitely long enough.  ',
+    contentHtml: '  <p>This body is definitely long enough.</p>  ',
+  });
+  await useCase.createReply({ threadId: 3, content: '  reply  ', replyToId: 4 });
+  await useCase.toggleThreadLike(3);
+  await useCase.toggleThreadFavorite(3);
+  await useCase.toggleReplyLike(4);
+
+  assert.equal(calls[0][2].signal, signal);
+  assert.equal(calls[2][2].signal, signal);
+  assert.deepEqual(calls[5][1], {
+    boardKey: 'general',
+    subCategoryKey: 'news',
+    title: 'Valid title',
+    contentHtml: '<p>This body is definitely long enough.</p>',
+  });
+  assert.deepEqual(calls[6][1], { threadId: 3, content: 'reply', replyToId: 4 });
+  assert.deepEqual(guardChecks, [[
+    { scope: 'threadTitle', text: 'Valid title' },
+    { scope: 'threadBody', text: 'This body is definitely long enough.' },
+  ], [
+    { scope: 'reply', text: 'reply' },
+  ]]);
+  assert.throws(() => useCase.loadThread({ threadId: 0 }), /valid Community thread id/i);
+  await assert.rejects(() => useCase.createThread({
+    boardKey: 'all',
+    title: 'short',
+    contentText: 'too short',
+    contentHtml: '<p>too short</p>',
+  }), /select a Community board/i);
+});
+
+test('notifications use case normalizes ids and validates paging', async () => {
+  const calls = [];
+  const useCase = createNotificationsUseCase({
+    getNotifications(request, options) {
+      calls.push(['load', request, options]);
+      return Promise.resolve({ page: 1, totalPages: 0, items: [] });
+    },
+    markNotifications(ids) {
+      calls.push(['mark', ids]);
+      return Promise.resolve();
+    },
+  });
+  const signal = new AbortController().signal;
+
+  await useCase.load({ page: 1, size: 20 }, signal);
+  await useCase.mark([4, 4, 5]);
+  await useCase.mark([]);
+  assert.equal(calls[0][2].signal, signal);
+  assert.deepEqual(calls.slice(1), [['mark', [4, 5]]]);
+  assert.throws(() => useCase.load({ page: 0 }), /valid notification page/i);
+  assert.throws(() => useCase.mark([0]), /valid notification id/i);
+});
+
+test('Community moderation normalizes width and punctuation, caches rules, and permanently disables speech', async () => {
+  assert.equal(normalizeCommunitySpeechText('Ｓｏｆｔ－ＷＡＲＥ！'), 'soft-ware'.replace('-', ''));
+  const rules = {
+    schemaVersion: 1,
+    revision: 2026071801,
+    normalization: 'compact-v1',
+    publishedAt: '2026-07-18T00:00:00Z',
+    rules: [{
+      id: 'request-upload-or-send',
+      scopes: ['threadTitle', 'threadBody', 'reply'],
+      clauses: [{ anyOf: ['求'] }, { anyOf: ['上传', '发'] }],
+    }],
+  };
+  const harness = createModerationHarness(rules);
+  const guard = createCommunitySpeechGuard(harness.dependencies);
+  const published = [];
+  guard.subscribe((disabled) => published.push(disabled));
+
+  assert.deepEqual(await guard.check([{ scope: 'reply', text: '普通讨论' }]), {
+    type: 'allowed',
+    revision: 2026071801,
+  });
+  assert.equal(harness.requests.length, 2);
+  assert.ok(harness.storage.values.has(COMMUNITY_STORAGE_KEYS.moderationRulesCache));
+
+  assert.deepEqual(await guard.check([{ scope: 'reply', text: '求！！！　发' }]), {
+    type: 'blocked',
+    revision: 2026071801,
+  });
+  assert.equal(guard.getSnapshot(), true);
+  assert.deepEqual(published, [true]);
+  assert.equal(harness.storage.values.get(COMMUNITY_STORAGE_KEYS.speechDisabled), 'true');
+  const metadata = JSON.parse(
+    harness.storage.values.get(COMMUNITY_STORAGE_KEYS.speechDisabledMetadata),
+  );
+  assert.equal(metadata.ruleId, 'request-upload-or-send');
+  assert.equal(JSON.stringify(metadata).includes('求'), false);
+  assert.deepEqual(await guard.check([{ scope: 'reply', text: 'anything' }]), {
+    type: 'alreadyDisabled',
+  });
+  assert.equal(harness.requests.length, 2);
+});
+
+test('Community moderation reuses a valid digest-checked cache without network', async () => {
+  const rules = {
+    schemaVersion: 1,
+    revision: 2,
+    normalization: 'compact-v1',
+    publishedAt: '2026-07-18T00:00:00Z',
+    rules: [{ id: 'software', scopes: ['reply'], clauses: [{ anyOf: ['软件'] }] }],
+  };
+  const first = createModerationHarness(rules);
+  const firstGuard = createCommunitySpeechGuard(first.dependencies);
+  assert.equal((await firstGuard.check([{ scope: 'reply', text: 'hello' }])).type, 'allowed');
+
+  const secondRequests = [];
+  const secondGuard = createCommunitySpeechGuard({
+    ...first.dependencies,
+    clock: { now: () => new Date('2026-08-04T00:30:00.000Z') },
+    http: {
+      async request(request) {
+        secondRequests.push(request);
+        throw new Error('network should not be used');
+      },
+    },
+  });
+  assert.deepEqual(await secondGuard.check([{ scope: 'reply', text: 'hello' }]), {
+    type: 'allowed',
+    revision: 2,
+  });
+  assert.deepEqual(secondRequests, []);
+});
+
+test('Community mutations fail closed when moderation rules cannot be verified', async () => {
+  const rules = {
+    schemaVersion: 1,
+    revision: 3,
+    normalization: 'compact-v1',
+    publishedAt: '2026-07-18T00:00:00Z',
+    rules: [{ id: 'software', scopes: ['reply'], clauses: [{ anyOf: ['软件'] }] }],
+  };
+  const harness = createModerationHarness(rules, { digest: '0'.repeat(64) });
+  const guard = createCommunitySpeechGuard(harness.dependencies);
+  const decision = await guard.check([{ scope: 'reply', text: 'hello' }]);
+  assert.equal(decision.type, 'rulesUnavailable');
+  assert.ok(decision.error instanceof CommunitySpeechRulesUnavailableError);
+  assert.equal(harness.storage.values.has(COMMUNITY_STORAGE_KEYS.speechDisabled), false);
+
+  const useCase = createCommunityUseCase({
+    createCommunityReply() {
+      throw new Error('must not reach API');
+    },
+  }, guard);
+  await assert.rejects(
+    () => useCase.createReply({ threadId: 1, content: 'hello' }),
+    CommunitySpeechRulesUnavailableError,
+  );
+
+  const blockedUseCase = createCommunityUseCase({}, {
+    async check() { return { type: 'alreadyDisabled' }; },
+    getSnapshot() { return true; },
+    async isSpeechDisabled() { return true; },
+    subscribe() { return () => undefined; },
+  });
+  await assert.rejects(
+    () => blockedUseCase.createReply({ threadId: 1, content: 'hello' }),
+    CommunitySpeechBlockedError,
+  );
+});
+
+function createModerationHarness(rules, overrides = {}) {
+  const rulesText = JSON.stringify(rules);
+  const digest = overrides.digest ?? createHash('sha256').update(rulesText).digest('hex');
+  const manifest = JSON.stringify({
+    schemaVersion: 1,
+    revision: rules.revision,
+    rulesPath: 'rules.json',
+    sha256: digest,
+    size: Buffer.byteLength(rulesText, 'utf8'),
+    cacheMaxAgeSeconds: 21_600,
+  });
+  const requests = [];
+  const storage = {
+    values: new Map(),
+    async get(key) { return this.values.get(key) ?? null; },
+    async set(key, value) { this.values.set(key, value); },
+    async delete(key) { this.values.delete(key); },
+  };
+  const dependencies = {
+    clock: { now: () => new Date('2026-08-04T00:00:00.000Z') },
+    storage,
+    hasher: {
+      async sha256(value) {
+        return createHash('sha256').update(value).digest('hex');
+      },
+    },
+    logger: {
+      debug() {},
+      error() {},
+      info() {},
+      warn() {},
+    },
+    http: {
+      async request(request) {
+        requests.push(request);
+        return {
+          status: 200,
+          headers: {},
+          body: request.url.endsWith('/manifest.json') ? manifest : rulesText,
+        };
+      },
+    },
+    manifestUrl: 'https://example.com/community/manifest.json',
+  };
+  return { dependencies, requests, storage };
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+function nextTask() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}

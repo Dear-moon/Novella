@@ -4,88 +4,33 @@
 
 # 📚 Novella
 
-<a href="https://trendshift.io/repositories/22931" target="_blank"><img src="https://trendshift.io/api/badge/repositories/22931" alt="Kanscape%2FNovella | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+<a href="https://trendshift.io/repositories/22931?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-22931" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/22931" alt="Kanscape%2FNovella | Trendshift" width="250" height="55"/></a>
 
-![Flutter](https://img.shields.io/badge/Flutter-02569B?logo=flutter&logoColor=white)
-![Rust](https://img.shields.io/badge/Rust-000000?logo=rust&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
+![React Native](https://img.shields.io/badge/React%20Native-61DAFB?logo=react&logoColor=black)
+![Expo](https://img.shields.io/badge/Expo-000020?logo=expo&logoColor=white)
 ![License](https://img.shields.io/badge/License-AGPL%203.0-blue)
 
-**轻书架第三方客户端**
+轻书架第三方客户端。
 
-基于 Flutter + Rust FFI 构建，提供纯净的界面和阅读体验。
+本仓库正在从 Dart 迁移到 TypeScript：
 
-<br/>
+- `apps/mobile`：基于 React Native + Expo 的 Android 与 iOS 客户端。
+- `apps/site`：React 静态网站。
+- `packages/*`：与平台无关的客户端核心、协议。
 
-<table align="center">
-    <tr>
-        <td width="25%"><img src="assets/screenshots_1.PNG" width="100%"></td>
-        <td width="25%"><img src="assets/screenshots_2.PNG" width="100%"></td>
-        <td width="25%"><img src="assets/screenshots_3.PNG" width="100%"></td>
-        <td width="25%"><img src="assets/screenshots_4.PNG" width="100%"></td>
-    </tr>
-    <tr>
-        <td width="25%"><img src="assets/screenshots_5.PNG" width="100%"></td>
-        <td width="25%"><img src="assets/screenshots_6.PNG" width="100%"></td>
-        <td width="25%"><img src="assets/screenshots_7.PNG" width="100%"></td>
-        <td width="25%"><img src="assets/screenshots_8.PNG" width="100%"></td>
-    </tr>
-</table>
+原有的 Flutter 实现保留在 `archive/flutter` 分支上。
 
-## 🚧 注意事项
+## 开发状态
 
-- 本项目处于快速迭代阶段，功能尚不完善，可能存在较多问题。请谨慎使用。
+React Native 重写正在积极开发中，欢迎向本仓库提交代码。功能开发清单见 [Issues](https://github.com/Kanscape/Novella/issues) 中的待办事项；如果你想做的功能不在清单中，请先在 [Discussions](https://github.com/Kanscape/Novella/discussions) 中讨论。
 
-## ✨ 核心特性
+## 移动端开发
 
-- **阅读体验**：支持字号调节、简繁转换与段落间距调整。提供多种预设纯色背景及自定义背景色。
-- **界面设计**：适配 Material Design 3，支持从封面提取动态主题色，提供浅色/深色/纯黑模式。
-- **云端同步**：支持 GitHub Gist 同步，阅读时长、书籍标记、多端进度互通。
-- **内容发现**：集成多维度榜单，支持按等级/标签筛选或屏蔽内容。
+移动端使用 Expo Development Build 开发，支持 Android 与 iOS。
 
-## 🛠️ 技术栈
+开发工作流（首次构建、日常开发、重新生成原生工程）与代码规范（原生设计、图标、组件泛用性）见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-- **UI 框架**：Flutter (Riverpod)
-- **底层核心**：Rust (通过 `flutter_rust_bridge` 调用)
-- **通信协议**：SignalR + MessagePack (二进制通讯)
-- **字体引擎**：基于 Rust 的 WOFF2 动态转码与解混淆
+## 许可证
 
-## 📬 反馈与交流
-
-- 💡 **哇，新点子！** [前往 Discussions 讨论](https://github.com/Kanscape/Novella/discussions/7)
-- 🐛 **发现问题？** [提交 Issue 反馈](https://github.com/Kanscape/Novella/issues/new?labels=bug)
-
-## 🚀 快速开始
-
-### 环境需求
-- Flutter 3.7.2+
-- FVM
-- Rust Stable（可选，仓库已包含预编译文件）
-
-### 构建运行
-
-```bash
-# 1. 安装 Git LFS
-git lfs install
-
-# 2. 克隆项目
-git clone https://github.com/Kanscape/Novella.git
-cd Novella
-
-# 3. 使 FVM 切到仓库要求的 Flutter 版本
-fvm use
-
-# 4. 获取依赖
-fvm flutter pub get
-
-# 5. 运行
-fvm flutter run
-```
-
-## 🙏 致谢
-
-- 本项目参考了 [LightNovelShelf Web](https://github.com/LightNovelShelf/Web) 的实现与数据结构，特此感谢。
-- 于此处前往 [轻书架](https://www.lightnovel.app) 站点。
-
-## ⚠️ 免责声明
-
-- 本项目仅供学习交流使用，严禁用于商业用途。
+AGPL-3.0。参见 [LICENSE](LICENSE)。

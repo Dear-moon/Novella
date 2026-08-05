@@ -1,62 +1,64 @@
 name: Build iOS IPA
 
 on:
-  workflow_dispatch: # 手动触发
+  workflow_dispatch:
   pull_request:
     branches: ["main"]
     paths:
-      - 'lib/**'
-      - 'ios/**'
-      - 'macos/Novella.icon/**'
-      - 'rust/**'
-      - 'pubspec.yaml'
-      - 'pubspec.lock'
-      - '.github/workflows/build_ios_ipa.yml'
+      - "apps/mobile/**"
+      - "packages/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.base.json"
+      - ".github/workflows/build_ios_ipa.yml"
   push:
     branches: ["main"]
+    tags: ["v*"]
     paths:
-      - 'lib/**'
-      - 'ios/**'
-      - 'macos/Novella.icon/**'
-      - 'rust/**'
-      - 'pubspec.yaml'
-      - 'pubspec.lock'
-      - '.github/workflows/build_ios_ipa.yml'
+      - "apps/mobile/**"
+      - "packages/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.base.json"
+      - ".github/workflows/build_ios_ipa.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-ios-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-ipa:
     name: Build Unsigned IPA
-    runs-on: macos-15
-    
+    runs-on: macos-26
+
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v5
+      - name: Checkout
+        uses: actions/checkout@v7
         with:
-          lfs: false
           fetch-depth: 0
-
-      - name: Restore Git LFS Cache
-        uses: actions/cache@v5
-        with:
-          path: .git/lfs/objects
-          key: lfs-ios-${{ runner.os }}-${{ hashFiles('ios/libs/**', 'ios/Runner/Assets.xcassets/**', 'macos/Novella.icon/**') }}
-          restore-keys: |
-            lfs-ios-${{ runner.os }}-
-
-      - name: Pull Required Git LFS Files
-        run: |
-          git lfs install --local
-          git lfs pull --include="ios,macos/Novella.icon" --exclude=""
 
       - name: Set Build Metadata
         run: |
           set -euo pipefail
           git fetch --no-tags origin main:refs/remotes/origin/main
 
+          RELEASE_VERSION=""
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
             BUILD_NUMBER="$(git rev-list --count origin/main)"
             BUILD_CHANNEL="pr"
             BUILD_LABEL="PR #${{ github.event.pull_request.number }}"
+          elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            if [[ ! "$GITHUB_REF_NAME" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+              echo "::error::Release tag must use vX.Y.Z format: $GITHUB_REF_NAME"
+              exit 1
+            fi
+            RELEASE_VERSION="${BASH_REMATCH[1]}"
+            BUILD_NUMBER="$(git rev-list --count HEAD)"
+            BUILD_CHANNEL="tag"
+            BUILD_LABEL="Build $BUILD_NUMBER"
           elif [ "$GITHUB_REF_NAME" = "main" ]; then
             BUILD_NUMBER="$(git rev-list --count HEAD)"
             BUILD_CHANNEL="main"
@@ -68,98 +70,94 @@ jobs:
           fi
 
           {
-            echo "BUILD_NUMBER=$BUILD_NUMBER"
-            echo "BUILD_CHANNEL=$BUILD_CHANNEL"
-            echo "BUILD_LABEL=$BUILD_LABEL"
+            echo "APP_VERSION=$RELEASE_VERSION"
+            echo "APP_BUILD_NUMBER=$BUILD_NUMBER"
+            echo "APP_BUILD_CHANNEL=$BUILD_CHANNEL"
+            echo "APP_BUILD_LABEL=$BUILD_LABEL"
           } >> "$GITHUB_ENV"
 
-      # 指定 Xcode 26
-      - name: Select Xcode 26
-        run: sudo xcode-select -s /Applications/Xcode_26.2.app/Contents/Developer
-
-      # 配置 Flutter
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
         with:
-          channel: 'stable'
-          flutter-version: '3.44.0'
-          cache: true
+          node-version: 22
+          cache: npm
 
-      # 预缓存 iOS 引擎工件
-      - name: Precache Flutter iOS Artifacts
-        run: flutter precache --ios
+      - name: Install JavaScript dependencies
+        run: npm ci
 
-      # 获取依赖
-      - name: Flutter Pub Get
-        run: flutter pub get
-
-      # 安装 Pods 生成项目文件
-      - name: Install CocoaPods Dependencies
+      - name: Select Xcode
+        # macos-26 默认已指向 Xcode 26.6，这里显式固定避免 runner 默认值漂移。
         run: |
-          cd ios
-          pod install
-          cd ..
+          XCODE_APP="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)"
+          if [ -n "$XCODE_APP" ]; then
+            echo "DEVELOPER_DIR=$XCODE_APP/Contents/Developer" >> "$GITHUB_ENV"
+          fi
+          xcodebuild -version
+          xcodebuild -showsdks | head -5
 
-      # 移除所有签名配置
-      - name: Nuke Code Signing
+      - name: Show build environment
         run: |
-          echo "☢️ Nuking code signing configurations..."
-          
-          # 处理 Runner 项目
-          echo "   -> Patching Runner.xcodeproj..."
-          sed -i '' 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' ios/Runner.xcodeproj/project.pbxproj
-          sed -i '' 's/"CODE_SIGN_IDENTITY\[sdk=iphoneos\*\]" = "iPhone Developer";/"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "";/g' ios/Runner.xcodeproj/project.pbxproj
-          
-          # 处理 Pods 项目
-          echo "   -> Patching Pods.xcodeproj..."
-          # 将 Pods 项目中的所有签名要求强制改为 Manual 和 空
-          sed -i '' 's/CODE_SIGN_STYLE = Automatic;/CODE_SIGN_STYLE = Manual;/g' ios/Pods/Pods.xcodeproj/project.pbxproj
-          sed -i '' 's/CODE_SIGN_IDENTITY = "iPhone Developer";/CODE_SIGN_IDENTITY = "";/g' ios/Pods/Pods.xcodeproj/project.pbxproj
-          sed -i '' 's/"CODE_SIGN_IDENTITY\[sdk=iphoneos\*\]" = "iPhone Developer";/"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "";/g' ios/Pods/Pods.xcodeproj/project.pbxproj
+          echo "BUILD_CHANNEL=${{ env.APP_BUILD_CHANNEL }}"
+          echo "BUILD_LABEL=${{ env.APP_BUILD_LABEL }}"
+          echo "BUILD_NUMBER=${{ env.APP_BUILD_NUMBER }}"
+          echo "RELEASE_VERSION=${{ env.APP_VERSION }}"
 
-          # 处理 xcconfig
-          echo "   -> Patching Release.xcconfig..."
-          echo "CODE_SIGNING_ALLOWED = NO" >> ios/Flutter/Release.xcconfig
-          echo "CODE_SIGNING_REQUIRED = NO" >> ios/Flutter/Release.xcconfig
-          echo "CODE_SIGN_IDENTITY =" >> ios/Flutter/Release.xcconfig
-          echo "CODE_SIGN_STYLE = Manual" >> ios/Flutter/Release.xcconfig
-          
-          echo "✅ Code signing configurations nuked for EVERYTHING."
-
-      # 构建免签 Release
-      - name: Build iOS Release (No Codesign)
+      - name: Generate iOS project
+        working-directory: apps/mobile
         env:
-          RENA_ENDPOINT: ${{ secrets.RENA_ENDPOINT }}
-          RENA_PUBLIC_WRITE_KEY: ${{ secrets.RENA_PUBLIC_WRITE_KEY }}
+          APP_VERSION: ${{ env.APP_VERSION }}
+          APP_BUILD_NUMBER: ${{ env.APP_BUILD_NUMBER }}
+          APP_BUILD_CHANNEL: ${{ env.APP_BUILD_CHANNEL }}
+          APP_BUILD_LABEL: ${{ env.APP_BUILD_LABEL }}
+        run: npx expo prebuild --non-interactive --no-install --platform ios
+
+      - name: Install CocoaPods dependencies
+        working-directory: apps/mobile
+        run: npx pod-install ios
+
+      - name: Build unsigned iOS app
+        run: |
+          xcodebuild \
+            -workspace apps/mobile/ios/Novella.xcworkspace \
+            -scheme Novella \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath apps/mobile/ios/build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Verify built version matches metadata
         run: |
           set -euo pipefail
-          if [ "${GITHUB_EVENT_NAME:-}" != "pull_request" ]; then
-            if [ -z "${RENA_ENDPOINT:-}" ]; then
-              echo "::error::Missing RENA_ENDPOINT secret."
-              exit 1
-            fi
-            if [ -z "${RENA_PUBLIC_WRITE_KEY:-}" ]; then
-              echo "::error::Missing RENA_PUBLIC_WRITE_KEY secret."
-              exit 1
-            fi
+          APP_PATH="apps/mobile/ios/build/Build/Products/Release-iphoneos/Novella.app"
+          test -d "$APP_PATH"
+          BUILT_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Info.plist")"
+          BUILT_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Info.plist")"
+          echo "Built version: $BUILT_VERSION ($BUILT_BUILD)"
+          if [ -n "${{ env.APP_VERSION }}" ] && [ "$BUILT_VERSION" != "${{ env.APP_VERSION }}" ]; then
+            echo "::error::Built version $BUILT_VERSION does not match tag version ${{ env.APP_VERSION }}"
+            exit 1
           fi
-          flutter build ios --release --no-codesign --verbose \
-            --build-number="$BUILD_NUMBER" \
-            --dart-define=BUILD_CHANNEL="$BUILD_CHANNEL" \
-            --dart-define=BUILD_LABEL="$BUILD_LABEL" \
-            --dart-define=RENA_ENDPOINT="$RENA_ENDPOINT" \
-            --dart-define=RENA_PUBLIC_WRITE_KEY="$RENA_PUBLIC_WRITE_KEY"
+          if [ "$BUILT_BUILD" != "${{ env.APP_BUILD_NUMBER }}" ]; then
+            echo "::error::Built build number $BUILT_BUILD does not match ${{ env.APP_BUILD_NUMBER }}"
+            exit 1
+          fi
 
-      # 打包 IPA
       - name: Package IPA
         run: |
           mkdir Payload
-          mv build/ios/iphoneos/Runner.app Payload
-          zip -r novella.ipa Payload
+          cp -R apps/mobile/ios/build/Build/Products/Release-iphoneos/Novella.app Payload/
+          VERSION="${{ env.APP_VERSION }}"
+          if [ -z "$VERSION" ]; then
+            VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Payload/Novella.app/Info.plist)"
+          fi
+          zip -qry "novella-${VERSION}-${{ env.APP_BUILD_NUMBER }}-unsigned.ipa" Payload
 
-      # 上传产物
       - name: Upload IPA
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: novella-unsigned-ipa
-          path: novella.ipa
+          path: novella-*-unsigned.ipa
+          if-no-files-found: error

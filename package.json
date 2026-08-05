@@ -1,0 +1,34 @@
+{
+  "name": "novella-workspace",
+  "version": "0.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "check": "npm run check:boundaries && npm run typecheck",
+    "check:boundaries": "node scripts/check-boundaries.mjs",
+    "dev:mobile": "npm run dev --workspace @novella/mobile",
+    "dev:site": "npm run dev --workspace @novella/site",
+    "start": "npm run dev:mobile",
+    "android": "npm run android --workspace @novella/mobile",
+    "ios": "npm run ios --workspace @novella/mobile",
+    "test:client": "npm run test --workspace @novella/client-core && npm run test --workspace @novella/api-client && npm run test --workspace @novella/reader-engine && npm run test:shelf --workspace @novella/mobile && npm run test:community --workspace @novella/mobile",
+    "test:reader": "npm run test --workspace @novella/reader-engine && npm run test --workspace @novella/api-client && npm run test:reader --workspace @novella/mobile",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "overrides": {
+    "@tiptap/extension-bubble-menu": "3.27.1",
+    "@tiptap/extension-floating-menu": "3.27.1"
+  },
+  "engines": {
+    "node": ">=22.12.0",
+    "npm": ">=10.0.0"
+  },
+  "devDependencies": {
+    "@tiptap/extension-bubble-menu": "3.27.1",
+    "@tiptap/extension-floating-menu": "3.27.1"
+  }
+}

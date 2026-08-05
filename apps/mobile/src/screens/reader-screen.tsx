@@ -1,0 +1,333 @@
+import { router, useNavigation } from 'expo-router';
+import { useRoute } from 'expo-router/react-navigation';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SERVICE_ENDPOINTS } from '@novella/api-client';
+import {
+  getAdjacentChapterSortNum,
+  normalizeNovelBlocks,
+  processNovelFootnotes,
+  type ReaderMode,
+  type ReaderOpenPosition,
+} from '@novella/reader-engine';
+import { useBookDetailRouteTheme } from '@/components/book-detail-theme-provider';
+import { ReaderChapterNavigation } from '@/components/reader-chapter-navigation';
+import { ReaderWebView, type ReaderWebViewPosition, type ReaderWebViewTheme } from '@/components/reader-web-view';
+import { ReaderErrorState } from '@/components/reader-chrome';
+import { ReaderNavigation } from '@/components/reader-navigation';
+import { simplifyReaderChapterTitle } from '@/services/chapter-title';
+import { useReaderChapter } from '@/hooks/use-reader-chapter';
+import { useReaderChapterPreload } from '@/hooks/use-reader-chapter-preload';
+import { useReaderFont } from '@/hooks/use-reader-font';
+import { readerFontDataUrl } from '@/services/reader-font-loader';
+import { useReaderPositionSaver } from '@/hooks/use-reader-position-saver';
+import { presentReaderFootnote } from '@/services/reader-footnote-session';
+import { subscribeReaderChapterSelection } from '@/services/reader-chapter-selection';
+import {
+  type ReaderProgressCheckpoint,
+  stageReaderProgress,
+  syncReaderProgress,
+} from '@/services/reader-progress-sync';
+import { buildChapterXhtml } from '@/services/reader-xhtml-builder';
+import {
+  readerPositionToBlock,
+  readerPositionToProgression,
+} from '@/services/reader-locator-mapping';
+import { updateAppSettings, useAppSettings } from '@/services/settings';
+import { useReaderLifecycleSave } from '@/hooks/use-reader-lifecycle-save';
+import { useAppColorScheme, useAppTheme } from '@/theme/app-theme';
+import { resolveReaderColors } from '@/theme/theme-mode';
+
+interface NovelProgressInput {
+  chapterId: number;
+  position: string;
+}
+
+export interface ReaderScreenProps {
+  bookId: number;
+  sortNum: number;
+  openPosition?: ReaderOpenPosition;
+}
+
+const IOS_READER_TOP_TOOLBAR_HEIGHT = 44;
+const IOS_READER_BOTTOM_TOOLBAR_HEIGHT = 44;
+
+export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: ReaderScreenProps) {
+  const insets = useSafeAreaInsets();
+  const settings = useAppSettings();
+  const navigation = useNavigation<{
+    setParams(params: { position: ReaderOpenPosition; sortNum: string }): void;
+  }>();
+  const route = useRoute();
+  const { colors } = useAppTheme();
+  const [mode, setMode] = useState<ReaderMode>(settings.readerViewMode);
+  const conversion = settings.convertType === 'none' ? undefined : settings.convertType;
+  const { content, error, isLoading, reload } = useReaderChapter(
+    bookId,
+    sortNum,
+    conversion,
+    openPosition === 'saved',
+  );
+  const readerFont = useReaderFont(content?.chapter.fontUrl);
+
+  const requiresReaderFont = Boolean(content?.chapter.fontUrl?.trim());
+  const fontLoading = requiresReaderFont && (readerFont.status === 'idle' || readerFont.status === 'loading');
+
+  // The chapter stays an HTML fragment; the reader WebView receives a full
+  // XHTML document whose @font-face embeds the book font (one font per book
+  // on the backend).
+  const chapterHtml = content?.chapter.content ?? '';
+  // Extract footnote bodies (like the web master does) so the WebView renders
+  // the chapter without them, and the native footnote sheet can show the
+  // extracted note content when a marker is tapped.
+  const footnotes = useMemo(
+    () => (content ? processNovelFootnotes(chapterHtml) : { html: chapterHtml, notesById: {} }),
+    [content, chapterHtml],
+  );
+  // The chapter is rendered by the reader WebView, which (like the web master)
+  // consumes the raw server HTML and the font directly — no invisible
+  // codepoint stripping (that was a Flutter/RN text-layout requirement). The
+  // block list used for position anchoring must therefore also use the raw
+  // text so it stays byte-consistent with the rendered DOM.
+  const sanitizedHtml = footnotes.html;
+  const blocks = useMemo(
+    () => (content ? normalizeNovelBlocks(footnotes.html, undefined, { sanitize: false }) : []),
+    [content, footnotes.html],
+  );
+  const fontDataUrl = useMemo(() => {
+    if (!requiresReaderFont || readerFont.status !== 'loaded') return null;
+    return readerFontDataUrl(content?.chapter.fontUrl);
+  }, [content?.chapter.fontUrl, readerFont.status, requiresReaderFont]);
+
+  // Chapter document: rebuilds only when the chapter or the font changes.
+  // Theme knobs are read from a ref so theme changes are applied live via the
+  // WebView's CSS-variable injection (no reload, no position loss).
+  const themeRef = useRef<ReaderWebViewTheme>({});
+  const chapterXhtml = useMemo(
+    () => buildChapterXhtml(sanitizedHtml, {
+      fontDataUrl,
+      imageBaseUrl: SERVICE_ENDPOINTS.apiOrigin,
+      readingMode: mode,
+      // Preview is always available; the setting only chooses tap vs long press.
+      imagePreviewEnabled: true,
+      imagePreviewOpenOnLongPress: settings.readerImagePreviewOpenOnLongPress,
+      pagedNoAnimation: settings.readerPagedNoAnimation,
+      ...themeRef.current,
+    }),
+    [fontDataUrl, mode, sanitizedHtml, settings.readerImagePreviewOpenOnLongPress, settings.readerPagedNoAnimation],
+  );
+
+  const initialProgression = useMemo(() => {
+    if (!content) return 0;
+    if (openPosition === 'start') return 0;
+    if (openPosition === 'end') return 1;
+    return readerPositionToProgression(content.readPosition?.position, content.chapter.id, blocks);
+  }, [blocks, content, openPosition]);
+
+  const stagePosition = useCallback(
+    (position: NovelProgressInput) => stageReaderProgress({ bookId, ...position }),
+    [bookId],
+  );
+  const {
+    commit: commitPosition,
+    flush: flushPosition,
+    schedule: schedulePosition,
+  } = useReaderPositionSaver<NovelProgressInput, ReaderProgressCheckpoint>(
+    syncReaderProgress,
+    450,
+    stagePosition,
+  );
+  const lastPositionRef = useRef<ReaderWebViewPosition | null>(null);
+  const activeChapterIdRef = useRef<number | null>(null);
+  activeChapterIdRef.current = content?.chapter.id ?? null;
+
+
+  const savePosition = useCallback((position: ReaderWebViewPosition) => {
+    if (!content || activeChapterIdRef.current !== content.chapter.id) return;
+    lastPositionRef.current = position;
+    const mapped = readerPositionToBlock(position.progression, position.anchor, content.chapter.id, blocks);
+    if (!mapped) return;
+    schedulePosition(mapped);
+  }, [blocks, content, schedulePosition]);
+  const saveCurrentPosition = useCallback(() => {
+    const position = lastPositionRef.current;
+    if (!position || !content || activeChapterIdRef.current !== content.chapter.id) {
+      return flushPosition();
+    }
+    const mapped = readerPositionToBlock(position.progression, position.anchor, content.chapter.id, blocks);
+    if (!mapped) return flushPosition();
+    return commitPosition(mapped);
+  }, [blocks, commitPosition, content, flushPosition]);
+  useReaderLifecycleSave(saveCurrentPosition);
+
+  const chapterCount = content?.chapter.chapterTitles.length ?? 0;
+  useReaderChapterPreload({
+    bookId,
+    currentSortNum: sortNum,
+    enabled: content !== null && readerFont.status !== 'loading',
+    totalChapters: chapterCount,
+    windowSize: settings.readerPreloadWindow,
+    ...(conversion === undefined ? {} : { convert: conversion }),
+  });
+  const previousSortNum = getAdjacentChapterSortNum({ sortNum, totalChapters: chapterCount }, 'previous');
+  const nextSortNum = getAdjacentChapterSortNum({ sortNum, totalChapters: chapterCount }, 'next');
+
+  const openChapter = useCallback((nextSortNum: number, nextOpenPosition: ReaderOpenPosition) => {
+    void saveCurrentPosition();
+    lastPositionRef.current = null;
+    navigation.setParams({
+      position: nextOpenPosition,
+      sortNum: String(nextSortNum),
+    });
+  }, [navigation, saveCurrentPosition]);
+  useEffect(() => subscribeReaderChapterSelection(route.key, (selection) => {
+    if (selection.bookId === bookId && selection.kind === 'Novel') {
+      openChapter(selection.sortNum, selection.openPosition);
+    }
+  }), [bookId, openChapter, route.key]);
+
+  const changeMode = useCallback((nextMode: ReaderMode) => {
+    setMode(nextMode);
+    void updateAppSettings({ readerViewMode: nextMode });
+  }, []);
+  const openChapters = useCallback(() => {
+    router.push({
+      pathname: '/reader/[bookId]/chapters',
+      params: {
+        bookId: String(bookId),
+        readerKey: route.key,
+        sortNum: String(sortNum),
+        type: 'Novel',
+      },
+    });
+  }, [bookId, route.key, sortNum]);
+
+  const rawChapterTitle = content?.chapter.title ?? '';
+  const readerTitle = rawChapterTitle
+    ? settings.cleanChapterTitleScopes.includes('readerTitle')
+      ? simplifyReaderChapterTitle(rawChapterTitle)
+      : rawChapterTitle
+    : '';
+
+  // The reader WebView needs literal hex colors; the semantic dynamic colors
+  // (PlatformColor) cannot be serialized, so the page colors are resolved to
+  // hex here. The effective app scheme (settings.theme resolved against the
+  // system) drives the reader, so a forced light/dark appearance applies too.
+  //
+  // Platform conventions:
+  // - iOS: the dark reader is deep black by default (the OLED-black option is
+  //   hidden on iOS and always on).
+  // - Android: follow the book-comments page colors — the cover-extracted
+  //   Material palette when cover color extraction is enabled, otherwise the
+  //   system palette. OLED black (pure #000) is applied by
+  //   resolveReaderColors only when the effective scheme is dark.
+  const colorScheme = useAppColorScheme();
+  const isDarkReader = colorScheme === 'dark';
+  const useCoverPalette = process.env.EXPO_OS === 'android' && settings.coverColorExtraction;
+  const detailTheme = useBookDetailRouteTheme(bookId, null, null, useCoverPalette);
+  let readerBackground: string;
+  let readerTextColor: string;
+  if (process.env.EXPO_OS === 'ios') {
+    readerBackground = isDarkReader ? '#000000' : '#F2F2F7';
+    readerTextColor = isDarkReader ? '#FFFFFF' : '#111827';
+  } else {
+    const resolvedReaderColors = resolveReaderColors({
+      backgroundColor: useCoverPalette ? detailTheme.palette.surface : colors.surface as string,
+      colorScheme,
+      oledBlack: settings.oledBlack,
+      textColor: useCoverPalette ? detailTheme.palette.onSurface : colors.label as string,
+    });
+    readerBackground = resolvedReaderColors.backgroundColor;
+    readerTextColor = resolvedReaderColors.textColor;
+  }
+  // The native top/bottom bars float over the reader content (Liquid Glass
+  // overlay header on iOS, bottom toolbar), so the document area must be
+  // inset by their heights — same scheme as the previous renderer. The extra
+  // 16pt keeps the first line out of the header's glass blur zone in paged
+  // mode.
+  const readerTopInset = process.env.EXPO_OS === 'ios'
+    ? insets.top + IOS_READER_TOP_TOOLBAR_HEIGHT + 16
+    : 0;
+  const readerBottomInset = process.env.EXPO_OS === 'ios'
+    ? IOS_READER_BOTTOM_TOOLBAR_HEIGHT + insets.bottom + 16
+    : 0;
+
+  const openFootnote = useCallback(
+    (id: string) => {
+      const content = footnotes.notesById[id];
+      if (!content) return;
+      presentReaderFootnote({
+        content,
+        ...(fontDataUrl ? { fontDataUrl } : {}),
+      });
+      router.push({ pathname: '/reader/[bookId]/footnote', params: { bookId: String(bookId) } });
+    },
+    [bookId, fontDataUrl, footnotes.notesById],
+  );
+
+  const readerWebViewTheme: ReaderWebViewTheme = {
+    backgroundColor: readerBackground,
+    textColor: readerTextColor,
+    fontSize: settings.fontSize,
+    lineHeight: settings.fontSize * settings.readerLineHeight,
+    topPadding: readerTopInset,
+    bottomPadding: readerBottomInset,
+    sidePadding: settings.readerSidePadding,
+    firstLineIndent: settings.readerFirstLineIndent,
+  };
+  themeRef.current = readerWebViewTheme;
+
+  return (
+    <>
+      <View
+        style={[styles.root, { backgroundColor: readerBackground }]}
+      >
+        {isLoading || fontLoading ? (
+          <View style={styles.centered}><ActivityIndicator color={colors.accent as string} /></View>
+        ) : error ? (
+          <ReaderErrorState message={error} onRetry={reload} />
+        ) : requiresReaderFont && readerFont.status === 'error' ? (
+          <ReaderErrorState message="The chapter font could not be loaded, so the encoded text is unavailable." onRetry={readerFont.retry} />
+        ) : (
+          <ReaderWebView
+            key={`reader-${content?.chapter.id ?? sortNum}`}
+            html={chapterXhtml}
+            initialProgression={initialProgression}
+            readingMode={mode}
+            theme={readerWebViewTheme}
+            onPosition={savePosition}
+            onFootnote={openFootnote}
+            style={styles.reader}
+          />
+        )}
+      </View>
+      <ReaderNavigation
+        backgroundColor={readerBackground}
+        foregroundColor={readerTextColor}
+        mode={mode}
+        onModeChange={changeMode}
+        onOpenChapters={openChapters}
+        onOpenSettings={() => router.push({
+          pathname: '/reader/[bookId]/settings',
+          params: { bookId: String(bookId), readerKey: route.key, sortNum: String(sortNum), type: 'Novel' },
+        })}
+        title={readerTitle || 'Reader'}
+      />
+      <ReaderChapterNavigation
+        backgroundColor={readerBackground}
+        bottomInset={insets.bottom}
+        current={sortNum}
+        onNext={nextSortNum === null ? null : () => openChapter(nextSortNum, 'start')}
+        onPrevious={previousSortNum === null ? null : () => openChapter(previousSortNum, 'end')}
+        total={chapterCount}
+      />
+    </>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1 },
+  centered: { alignItems: 'center', flex: 1, justifyContent: 'center' },
+  reader: { flex: 1 },
+});
