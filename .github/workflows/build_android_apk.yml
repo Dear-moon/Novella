@@ -5,11 +5,11 @@ on:
   pull_request:
     branches: ["main"]
     paths:
+      - "apps/mobile/**"
+      - "packages/**"
+      - "package.json"
       - "package-lock.json"
-      - "apps/mobile/package.json"
-      - "apps/mobile/app.config.ts"
-      - "apps/mobile/plugins/**"
-      - "apps/mobile/modules/**"
+      - "tsconfig.base.json"
       - ".github/workflows/build_android_apk.yml"
   push:
     branches: ["main"]
@@ -33,7 +33,9 @@ jobs:
   build-unsigned-apk:
     name: Build Unsigned APK
     # 第三方 PR 不可信：只出免签包，不接触签名密钥。
-    if: github.event_name == 'pull_request'
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'workflow_dispatch' && github.ref_name != 'main')
     runs-on: ubuntu-latest
 
     steps:
@@ -47,9 +49,15 @@ jobs:
           set -euo pipefail
           git fetch --no-tags origin main:refs/remotes/origin/main
 
-          BUILD_NUMBER="$(git rev-list --count origin/main)"
-          BUILD_CHANNEL="pr"
-          BUILD_LABEL="PR #${{ github.event.pull_request.number }}"
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            BUILD_NUMBER="$(git rev-list --count origin/main)"
+            BUILD_CHANNEL="pr"
+            BUILD_LABEL="PR #${{ github.event.pull_request.number }}"
+          else
+            BUILD_NUMBER="$(git rev-list --count HEAD)"
+            BUILD_CHANNEL="branch"
+            BUILD_LABEL="$GITHUB_REF_NAME"
+          fi
 
           {
             echo "APP_BUILD_NUMBER=$BUILD_NUMBER"
@@ -110,7 +118,7 @@ jobs:
           set -euo pipefail
           APK_PATH="apps/mobile/android/app/build/outputs/apk/release/app-release-unsigned.apk"
           test -f "$APK_PATH"
-          cp "$APK_PATH" "novella-pr-${{ github.event.pull_request.number }}-unsigned.apk"
+          cp "$APK_PATH" "novella-${{ env.APP_BUILD_CHANNEL }}-${{ env.APP_BUILD_NUMBER }}-unsigned.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v7

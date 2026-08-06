@@ -5,11 +5,11 @@ on:
   pull_request:
     branches: ["main"]
     paths:
+      - "apps/mobile/**"
+      - "packages/**"
+      - "package.json"
       - "package-lock.json"
-      - "apps/mobile/package.json"
-      - "apps/mobile/app.config.ts"
-      - "apps/mobile/plugins/**"
-      - "apps/mobile/modules/**"
+      - "tsconfig.base.json"
       - ".github/workflows/build_ios_ipa.yml"
   push:
     branches: ["main"]
@@ -156,7 +156,16 @@ jobs:
           path: |
             ~/Library/Caches/CocoaPods
             apps/mobile/ios/Pods
-          key: ios-pods-${{ runner.os }}-${{ hashFiles('package-lock.json', 'apps/mobile/package.json', 'apps/mobile/app.config.ts') }}
+          key: >-
+            ios-pods-${{ runner.os }}-xcode26.6-${{
+              hashFiles(
+                'package-lock.json',
+                'apps/mobile/package.json',
+                'apps/mobile/app.config.ts',
+                'apps/mobile/plugins/**',
+                'apps/mobile/modules/**'
+              )
+            }}
 
       - name: Install CocoaPods dependencies
         working-directory: apps/mobile
