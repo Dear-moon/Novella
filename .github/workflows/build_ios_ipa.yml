@@ -5,11 +5,11 @@ on:
   pull_request:
     branches: ["main"]
     paths:
-      - "apps/mobile/**"
-      - "packages/**"
-      - "package.json"
       - "package-lock.json"
-      - "tsconfig.base.json"
+      - "apps/mobile/package.json"
+      - "apps/mobile/app.config.ts"
+      - "apps/mobile/plugins/**"
+      - "apps/mobile/modules/**"
       - ".github/workflows/build_ios_ipa.yml"
   push:
     branches: ["main"]
@@ -33,6 +33,12 @@ jobs:
   build-ipa:
     name: Build Unsigned IPA
     runs-on: macos-26
+
+    env:
+      CCACHE_COMPILERCHECK: content
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_MAXSIZE: 2G
 
     steps:
       - name: Checkout
@@ -85,15 +91,48 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci
 
-      - name: Select Xcode
-        # macos-26 默认已指向 Xcode 26.6，这里显式固定避免 runner 默认值漂移。
+      - name: Select Xcode 26.6
         run: |
-          XCODE_APP="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1 || true)"
-          if [ -n "$XCODE_APP" ]; then
-            echo "DEVELOPER_DIR=$XCODE_APP/Contents/Developer" >> "$GITHUB_ENV"
+          set -euo pipefail
+
+          XCODE_APP="$(
+            find /Applications -maxdepth 1 -type d \
+              -name 'Xcode_26.6*.app' |
+              sort -V |
+              tail -1
+          )"
+
+          if [ -z "$XCODE_APP" ]; then
+            echo "::error::Xcode 26.6 is not installed on this runner."
+            exit 1
           fi
+
+          # export 使当前步骤也能读到（GITHUB_ENV 只影响后续步骤）。
+          export DEVELOPER_DIR="$XCODE_APP/Contents/Developer"
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
+
           xcodebuild -version
           xcodebuild -showsdks | head -5
+
+      - name: Install ccache
+        run: |
+          if ! command -v ccache >/dev/null 2>&1; then
+            brew install ccache
+          fi
+          ccache --version | head -1
+
+      - name: Restore iOS compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ccache
+          key: >-
+            ios-ccache-v1-${{ runner.os }}-xcode26.6-${{ hashFiles('package-lock.json') }}-${{ github.sha }}
+          restore-keys: |
+            ios-ccache-v1-${{ runner.os }}-xcode26.6-${{ hashFiles('package-lock.json') }}-
+            ios-ccache-v1-${{ runner.os }}-xcode26.6-
+
+      - name: Reset ccache statistics
+        run: ccache --zero-stats
 
       - name: Show build environment
         run: |
@@ -131,10 +170,16 @@ jobs:
             -configuration Release \
             -destination 'generic/platform=iOS' \
             -derivedDataPath apps/mobile/ios/build \
+            -showBuildTimingSummary \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
             build
+
+      - name: Show ccache statistics
+        if: always()
+        run: ccache --show-stats
 
       - name: Verify built version matches metadata
         run: |

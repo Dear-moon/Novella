@@ -30,6 +30,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
+          # release 事件默认 checkout tag 的代码，需固定 main 保证部署的是最新网站。
+          ref: main
           fetch-depth: 1
 
       - name: Setup Node.js

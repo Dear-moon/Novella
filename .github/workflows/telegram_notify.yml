@@ -191,8 +191,11 @@ jobs:
           )"
 
           curl --fail --show-error --silent \
-            --retry 3 \
-            --retry-all-errors \
+            --connect-timeout 10 \
+            --max-time 30 \
+            --retry 2 \
+            --retry-connrefused \
+            --retry-delay 2 \
             --request POST \
             --header "Content-Type: application/json" \
             --data "$payload" \

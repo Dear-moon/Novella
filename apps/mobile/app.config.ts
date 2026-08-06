@@ -16,6 +16,18 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   plugins: [
     'expo-router',
     'expo-dev-client',
+    [
+      'expo-build-properties',
+      {
+        ios: {
+          // ccache 加速 iOS 原生 C++ 编译（CI 缓存 ~/Library/Caches/ccache）。
+          ccacheEnabled: true,
+          // SDK 57 默认值，显式固定防止漂移。
+          usePrecompiledModules: true,
+          buildReactNativeFromSource: false,
+        },
+      },
+    ],
     './plugins/with-android-signing',
     ['expo-media-library', {
       // Saving does not need read access. iOS uses the add-only permission;

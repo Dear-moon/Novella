@@ -5,11 +5,11 @@ on:
   pull_request:
     branches: ["main"]
     paths:
-      - "apps/mobile/**"
-      - "packages/**"
-      - "package.json"
       - "package-lock.json"
-      - "tsconfig.base.json"
+      - "apps/mobile/package.json"
+      - "apps/mobile/app.config.ts"
+      - "apps/mobile/plugins/**"
+      - "apps/mobile/modules/**"
       - ".github/workflows/build_android_apk.yml"
   push:
     branches: ["main"]
@@ -76,10 +76,10 @@ jobs:
         working-directory: apps/mobile
         run: npx expo prebuild --non-interactive --no-install --platform android
 
+      # Enhanced caching（v6 默认）：带 restore keys 与本地 build cache，
+      # 避免 Basic provider 因 prebuild 动态 versionCode 导致的永久 cache miss。
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
-        with:
-          cache-provider: basic
 
       - name: Show build environment
         run: |
@@ -187,10 +187,10 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: npx expo prebuild --non-interactive --no-install --platform android
 
+      # Enhanced caching（v6 默认）：带 restore keys 与本地 build cache，
+      # 避免 Basic provider 因 prebuild 动态 versionCode 导致的永久 cache miss。
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v6
-        with:
-          cache-provider: basic
 
       - name: Decode Keystore
         # prebuild 之后执行：android/ 是生成产物，checkout 时不存在。
