@@ -33,18 +33,20 @@ jobs:
   build-ipa:
     name: Build Unsigned IPA
     runs-on: macos-26
+    timeout-minutes: 45
 
     env:
       CCACHE_COMPILERCHECK: content
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_NOHASHDIR: "true"
-      CCACHE_MAXSIZE: 2G
+      CCACHE_MAXSIZE: 1G
 
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set Build Metadata
         run: |
@@ -56,6 +58,7 @@ jobs:
             BUILD_NUMBER="$(git rev-list --count origin/main)"
             BUILD_CHANNEL="pr"
             BUILD_LABEL="PR #${{ github.event.pull_request.number }}"
+            ARTIFACT_ID="pr-${{ github.event.pull_request.number }}-${GITHUB_SHA:0:7}"
           elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
             if [[ ! "$GITHUB_REF_NAME" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
               echo "::error::Release tag must use vX.Y.Z format: $GITHUB_REF_NAME"
@@ -65,14 +68,18 @@ jobs:
             BUILD_NUMBER="$(git rev-list --count HEAD)"
             BUILD_CHANNEL="tag"
             BUILD_LABEL="Build $BUILD_NUMBER"
+            ARTIFACT_ID="$GITHUB_REF_NAME"
           elif [ "$GITHUB_REF_NAME" = "main" ]; then
             BUILD_NUMBER="$(git rev-list --count HEAD)"
             BUILD_CHANNEL="main"
             BUILD_LABEL="Build $BUILD_NUMBER"
+            ARTIFACT_ID="main-${GITHUB_SHA:0:7}"
           else
             BUILD_NUMBER="$(git rev-list --count origin/main)"
             BUILD_CHANNEL="branch"
             BUILD_LABEL="$GITHUB_REF_NAME"
+            SAFE_REF="${GITHUB_REF_NAME//\//-}"
+            ARTIFACT_ID="branch-${SAFE_REF}-${GITHUB_SHA:0:7}"
           fi
 
           {
@@ -80,7 +87,19 @@ jobs:
             echo "APP_BUILD_NUMBER=$BUILD_NUMBER"
             echo "APP_BUILD_CHANNEL=$BUILD_CHANNEL"
             echo "APP_BUILD_LABEL=$BUILD_LABEL"
+            echo "APP_ARTIFACT_ID=$ARTIFACT_ID"
           } >> "$GITHUB_ENV"
+
+      - name: Verify release tag target
+        # 与 Android 保持一致：tag 构建不应依赖仓库层 Ruleset 才能拦住坏 tag。
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "::error::Release tag must point to a commit reachable from main."
+            exit 1
+          }
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -122,7 +141,8 @@ jobs:
           ccache --version | head -1
 
       - name: Restore iOS compiler cache
-        uses: actions/cache@v4
+        id: ios-ccache
+        uses: actions/cache/restore@v4
         with:
           path: ~/Library/Caches/ccache
           key: >-
@@ -151,11 +171,13 @@ jobs:
         run: npx expo prebuild --non-interactive --no-install --platform ios
 
       - name: Restore CocoaPods cache
-        uses: actions/cache@v4
+        id: ios-pods
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/Library/Caches/CocoaPods
             apps/mobile/ios/Pods
+            apps/mobile/ios/Podfile.lock
           key: >-
             ios-pods-${{ runner.os }}-xcode26.6-${{
               hashFiles(
@@ -163,13 +185,27 @@ jobs:
                 'apps/mobile/package.json',
                 'apps/mobile/app.config.ts',
                 'apps/mobile/plugins/**',
-                'apps/mobile/modules/**'
+                'apps/mobile/modules/**/ios/**',
+                'apps/mobile/modules/**/*.podspec',
+                'apps/mobile/modules/**/expo-module.config.json'
               )
             }}
 
       - name: Install CocoaPods dependencies
         working-directory: apps/mobile
         run: npx pod-install ios
+
+      - name: Save CocoaPods cache
+        # pod install 之后才保存（save 立即执行，放前面会存空目录/旧内容）。
+        # 只由 main 写入：PR 缓存存 merge-ref scope，关闭后无复用价值。
+        if: success() && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/Library/Caches/CocoaPods
+            apps/mobile/ios/Pods
+            apps/mobile/ios/Podfile.lock
+          key: ${{ steps.ios-pods.outputs.cache-primary-key }}
 
       - name: Build unsigned iOS app
         run: |
@@ -189,6 +225,16 @@ jobs:
       - name: Show ccache statistics
         if: always()
         run: ccache --show-stats
+
+      - name: Save iOS compiler cache
+        # 编译完成之后才保存（save 立即执行）。
+        # 只由 main 写入：PR 缓存存 merge-ref scope，关闭后无复用价值，
+        # 且避免 1G 条目快速挤爆 10G 仓库缓存上限。
+        if: success() && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/Library/Caches/ccache
+          key: ${{ steps.ios-ccache.outputs.cache-primary-key }}
 
       - name: Verify built version matches metadata
         run: |
@@ -211,15 +257,13 @@ jobs:
         run: |
           mkdir Payload
           cp -R apps/mobile/ios/build/Build/Products/Release-iphoneos/Novella.app Payload/
-          VERSION="${{ env.APP_VERSION }}"
-          if [ -z "$VERSION" ]; then
-            VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Payload/Novella.app/Info.plist)"
-          fi
-          zip -qry "novella-${VERSION}-${{ env.APP_BUILD_NUMBER }}-unsigned.ipa" Payload
+          zip -qry "novella-${{ env.APP_ARTIFACT_ID }}-unsigned.ipa" Payload
 
       - name: Upload IPA
         uses: actions/upload-artifact@v7
         with:
-          name: novella-unsigned-ipa
+          name: novella-unsigned-ipa-${{ env.APP_ARTIFACT_ID }}
           path: novella-*-unsigned.ipa
           if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

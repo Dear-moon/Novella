@@ -7,8 +7,7 @@ on:
   release:
     types: [published]
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: telegram-notify-${{ github.event_name }}-${{ github.ref }}
@@ -18,10 +17,7 @@ jobs:
   notify:
     name: Notify
     runs-on: ubuntu-latest
-
-    env:
-      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+    timeout-minutes: 2
 
     steps:
       - name: Build message
@@ -162,6 +158,9 @@ jobs:
       - name: Send Telegram message
         shell: bash
         env:
+          # secrets 只在该步骤可见；Build message 不需要它们。
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           MESSAGE_TEXT: ${{ steps.message.outputs.text }}
           DISABLE_WEB_PAGE_PREVIEW: ${{ steps.message.outputs.disable_web_page_preview }}
         run: |
