@@ -111,6 +111,14 @@ jobs:
           APP_BUILD_LABEL: ${{ env.APP_BUILD_LABEL }}
         run: npx expo prebuild --non-interactive --no-install --platform ios
 
+      - name: Restore CocoaPods cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/CocoaPods
+            apps/mobile/ios/Pods
+          key: ios-pods-${{ runner.os }}-${{ hashFiles('package-lock.json', 'apps/mobile/package.json', 'apps/mobile/app.config.ts') }}
+
       - name: Install CocoaPods dependencies
         working-directory: apps/mobile
         run: npx pod-install ios
