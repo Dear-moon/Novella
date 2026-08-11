@@ -524,6 +524,7 @@ export interface OnlineInfo {
 
 export interface UserGrowth {
   experience: number;
+  coin: number;
   level: number;
   growthLevel: number;
   currentLevelExperience: number;
@@ -539,7 +540,6 @@ export interface UserProfile {
   email: string;
   inviteCode: string;
   groupName: string;
-  point: number;
   unreadNotificationCount: number;
   registeredAt: string | null;
   growth: UserGrowth;
@@ -815,7 +815,10 @@ export interface AnnouncementItem {
   id: number;
   title: string;
   createdAt: string;
+  contentHtml: string;
 }
+
+export type AnnouncementDetail = AnnouncementItem;
 
 export interface AnnouncementPage {
   page: number;
@@ -1014,11 +1017,25 @@ export class ApiClient {
 
   getAnnouncementList(
     request: AnnouncementListRequest = { page: 1, size: 5 },
+    options: RequestScheduleOptions = {},
   ): Promise<AnnouncementPage> {
     return this.invoke(
       'GetAnnouncementList',
       { Page: request.page, Size: request.size },
       decodeAnnouncementPage,
+      options,
+    );
+  }
+
+  getAnnouncementDetail(
+    id: number,
+    options: RequestScheduleOptions = {},
+  ): Promise<AnnouncementDetail> {
+    return this.invoke(
+      'GetAnnouncementDetail',
+      { Id: id },
+      decodeAnnouncementDetail,
+      options,
     );
   }
 
@@ -1279,7 +1296,11 @@ export class ApiClient {
   async getBookListByIds(ids: number[]): Promise<BookListItem[]> {
     const uniqueIds = normalizeBatchIds(ids);
     if (uniqueIds.length === 0) return Promise.resolve([]);
-    return this.invoke('GetBookListByIds', { Ids: uniqueIds }, decodeBookListItems);
+    return this.invoke(
+      'GetBookListByIds',
+      { Ids: uniqueIds },
+      decodeResolvableBookListItems,
+    );
   }
 
   async getComicSeriesByIds(ids: number[]): Promise<ComicSeriesListPage> {
@@ -1488,6 +1509,19 @@ export function decodeBookListPage(value: unknown): BookListPage {
 }
 
 export function decodeBookListItems(value: unknown): BookListItem[] {
+  return getRawBookListItems(value).map(decodeBookListItem);
+}
+
+function decodeResolvableBookListItems(value: unknown): BookListItem[] {
+  // GetBookListByIds preserves unresolved request positions with null-like
+  // placeholders. Omit those entries while keeping strict decoding for every
+  // record-shaped book returned by the server.
+  return getRawBookListItems(value)
+    .filter(isRecord)
+    .map(decodeBookListItem);
+}
+
+function getRawBookListItems(value: unknown): unknown[] {
   const rawItems = Array.isArray(value)
     ? value
     : isRecord(value) && Array.isArray(value.Data)
@@ -1496,7 +1530,7 @@ export function decodeBookListItems(value: unknown): BookListItem[] {
   if (rawItems === null) {
     throw new ApiError('Invalid book list items.', 'server');
   }
-  return rawItems.map(decodeBookListItem);
+  return rawItems;
 }
 
 export function decodeComicSeriesListPage(value: unknown): ComicSeriesListPage {
@@ -1528,11 +1562,11 @@ export function decodeUserProfile(value: unknown): UserProfile {
     email: asStringOrEmpty(record.Email),
     inviteCode: asStringOrEmpty(record.InviteCode),
     groupName: asStringOrEmpty(role.Name),
-    point: asNumber(record.Point, 0),
     unreadNotificationCount: asNumber(record.UnreadNotificationCount, 0),
     registeredAt: asNullableDateString(record.RegisterAt),
     growth: {
       experience: asNumber(growth.Exp, 0),
+      coin: asNumber(growth.Coin, 0),
       level: asNumber(growth.Level, 0),
       growthLevel: asNumber(growth.GrowthLevel, 0),
       currentLevelExperience: asNumber(growth.CurrentLevelExp, 0),
@@ -1592,14 +1626,21 @@ export function decodeAnnouncementPage(value: unknown): AnnouncementPage {
   return {
     page: asNumber(record.Page, 1),
     totalPages: asNumber(record.TotalPages, 1),
-    items: rawItems.map((item) => {
-      const announcement = asRecord(item, 'announcement item');
-      return {
-        id: asNumber(announcement.Id),
-        title: asString(announcement.Title),
-        createdAt: asDateString(announcement.CreatedAt),
-      };
-    }),
+    items: rawItems.map(decodeAnnouncementItem),
+  };
+}
+
+export function decodeAnnouncementDetail(value: unknown): AnnouncementDetail {
+  return decodeAnnouncementItem(value);
+}
+
+function decodeAnnouncementItem(value: unknown): AnnouncementItem {
+  const announcement = asRecord(value, 'announcement item');
+  return {
+    id: asNumber(announcement.Id),
+    title: asString(announcement.Title),
+    createdAt: asDateString(announcement.CreatedAt),
+    contentHtml: asStringOrEmpty(announcement.Content),
   };
 }
 
@@ -1996,6 +2037,7 @@ export function decodeBookDetail(value: unknown): BookDetail {
   const book = asRecord(response.Book ?? response, 'book detail');
   const classification = decodeBookClassification(book.Extra);
   const category = decodeOptionalBookCategory(book.Category);
+  const rawCoverUrl = asString(book.Cover);
 
   return {
     id: asNumber(book.Id),
@@ -2004,8 +2046,8 @@ export function decodeBookDetail(value: unknown): BookDetail {
       : book.Type === 'Novel' || book.Type === 0
         ? 'Novel'
         : null,
-    coverUrl: asString(book.Cover),
-    coverPlaceholder: extractBlurHashPlaceholder(asString(book.Cover)),
+    coverUrl: normalizeCoverUrl(rawCoverUrl),
+    coverPlaceholder: extractBlurHashPlaceholder(rawCoverUrl),
     title: asString(book.Title),
     authorName: asNullableString(book.Author),
     category,
@@ -2046,10 +2088,11 @@ export function decodeComicInfo(value: unknown): ComicInfo {
   const response = asRecord(value, 'comic info response');
   const book = asRecord(response.Book ?? response, 'comic info book');
   const classification = decodeBookClassification(book.Extra);
+  const rawCoverUrl = asString(book.Cover);
   return {
     id: asNumber(book.Id),
-    coverUrl: asString(book.Cover),
-    coverPlaceholder: extractBlurHashPlaceholder(asString(book.Cover)),
+    coverUrl: normalizeCoverUrl(rawCoverUrl),
+    coverPlaceholder: extractBlurHashPlaceholder(rawCoverUrl),
     title: asString(book.Title),
     authorName: asNullableString(book.Author),
     views: asNumber(book.Views, 0),
@@ -2068,13 +2111,14 @@ export function decodeComicInfo(value: unknown): ComicInfo {
 export function decodeComicSeriesDetail(value: unknown): ComicSeriesDetail {
   const response = asRecord(value, 'comic series detail response');
   const series = asRecord(response.Series, 'comic series detail');
-  const coverUrl = asString(series.Cover);
+  const rawCoverUrl = asString(series.Cover);
+  const coverUrl = normalizeCoverUrl(rawCoverUrl);
   return {
     id: typeof series.Id === 'number' ? String(series.Id) : asString(series.Id),
     title: asString(series.Title),
     originalTitle: asNullableString(series.OriginalTitle),
     coverUrl,
-    coverPlaceholder: extractBlurHashPlaceholder(coverUrl),
+    coverPlaceholder: extractBlurHashPlaceholder(rawCoverUrl),
     authorName: asNullableString(series.Author),
     views: asNumber(series.Views, 0),
     favoriteCount: asNumber(series.Favorite, 0),
@@ -2206,6 +2250,7 @@ export function decodeRefreshToken(value: unknown): string {
 
 function decodeBookListItem(value: unknown): BookListItem {
   const book = asRecord(value, 'book list item');
+  const rawCoverUrl = asString(book.Cover);
   // MessagePack serializes the backend enum as its numeric value. The Web
   // reference types expose the string form, so accept both wire variants.
   const type = book.Type === 'Comic' || book.Type === 1 ? 'Comic' : 'Novel';
@@ -2214,8 +2259,8 @@ function decodeBookListItem(value: unknown): BookListItem {
     type,
     title: asString(book.Title),
     seriesTitle: asNullableString(book.SeriesTitle),
-    coverUrl: asString(book.Cover),
-    coverPlaceholder: extractBlurHashPlaceholder(asString(book.Cover)),
+    coverUrl: normalizeCoverUrl(rawCoverUrl),
+    coverPlaceholder: extractBlurHashPlaceholder(rawCoverUrl),
     authorName: asNullableString(book.UserName),
     lastUpdatedAt: asDateString(book.LastUpdatedAt),
     level: asNullableNumber(book.Level),
@@ -2226,13 +2271,14 @@ function decodeBookListItem(value: unknown): BookListItem {
 
 function decodeComicSeriesListItem(value: unknown): ComicSeriesListItem {
   const comic = asRecord(value, 'comic series list item');
-  const coverUrl = asString(comic.Cover);
+  const rawCoverUrl = asString(comic.Cover);
+  const coverUrl = normalizeCoverUrl(rawCoverUrl);
   return {
     id: asNumber(comic.Id),
     title: asString(comic.Title),
     originalTitle: asNullableString(comic.OriginalTitle),
     coverUrl,
-    coverPlaceholder: extractBlurHashPlaceholder(coverUrl),
+    coverPlaceholder: extractBlurHashPlaceholder(rawCoverUrl),
     chapterCount: Math.max(0, asNumber(comic.Count, 0)),
     lastUpdatedAt: asDateString(comic.LastUpdatedAt),
   };
@@ -2336,7 +2382,8 @@ function decodeBookChapters(value: unknown): BookChapter[] {
 function decodeComicSeriesVolume(value: unknown): ComicSeriesVolume {
   const volume = asRecord(value, 'comic series volume');
   const uploader = asRecord(volume.Uploader, 'comic series uploader');
-  const coverUrl = asString(volume.Cover);
+  const rawCoverUrl = asString(volume.Cover);
+  const coverUrl = normalizeCoverUrl(rawCoverUrl);
   const position = decodeBookReadPosition(volume.ReadPosition);
   const readPosition = position === null
     ? null
@@ -2354,7 +2401,7 @@ function decodeComicSeriesVolume(value: unknown): ComicSeriesVolume {
       avatarUrl: asStringOrEmpty(uploader.Avatar),
     },
     coverUrl,
-    coverPlaceholder: extractBlurHashPlaceholder(coverUrl),
+    coverPlaceholder: extractBlurHashPlaceholder(rawCoverUrl),
     createdAt: asDateString(volume.CreatedAt),
     lastUpdatedChapter: asNullableString(volume.LastUpdatedChapter),
     lastUpdatedAt: asDateString(volume.LastUpdatedAt),
@@ -2502,24 +2549,49 @@ export function normalizeBlurHash(value: unknown): string | null {
 }
 
 export function extractBlurHashPlaceholder(value: string): string | null {
-  return normalizeBlurHash(extractRawQueryValue(value, 'placeholder'));
+  return normalizeBlurHash(extractRawQueryValue(value, 'placeholder')?.value);
+}
+
+/** Repairs legacy cover URLs whose raw base83 BlurHash contains URL-reserved
+ * characters such as `#`, `=`, and `:`. An unescaped `#` would otherwise turn
+ * the remainder (including the signed `t` parameter) into a fragment and make
+ * the image server reject the request. */
+export function normalizeCoverUrl(value: string): string {
+  const placeholder = extractRawQueryValue(value, 'placeholder');
+  if (!placeholder?.rawValue.includes('#')) return value;
+  const repairedValue = placeholder.rawValue.replaceAll('#', '%23');
+  return `${value.slice(0, placeholder.valueStart)}${repairedValue}${value.slice(placeholder.valueEnd)}`;
+}
+
+interface RawQueryValue {
+  rawValue: string;
+  value: string;
+  valueEnd: number;
+  valueStart: number;
 }
 
 /** Reads a query value straight from the raw URL string. The server normally
  * percent-encodes cover placeholders, but legacy/raw URLs can carry base83
- * characters unencoded — most notably `+`, which URLSearchParams would turn
- * into a space. Parsing the raw query (then decoding `%XX` and re-encoding `+`
- * as `%2B`) preserves the literal value. */
-function extractRawQueryValue(rawUrl: string, key: string): string | null {
+ * characters unencoded — including `+` and `#`. Parsing until the next `&`
+ * preserves these literal characters and the signed parameters after them. */
+function extractRawQueryValue(rawUrl: string, key: string): RawQueryValue | null {
   const queryStart = rawUrl.indexOf('?');
   if (queryStart < 0) return null;
-  const query = rawUrl.slice(queryStart + 1).split('#')[0] ?? '';
-  for (const pair of query.split('&')) {
-    const separator = pair.indexOf('=');
-    if (separator < 0 || pair.slice(0, separator) !== key) continue;
-    const encoded = pair.slice(separator + 1).replace(/\+/g, '%2B');
-    return encoded.replace(/%([0-9A-Fa-f]{2})/g, (_match, hex: string) =>
-      String.fromCharCode(Number.parseInt(hex, 16)));
+  let pairStart = queryStart + 1;
+  while (pairStart <= rawUrl.length) {
+    const pairEndCandidate = rawUrl.indexOf('&', pairStart);
+    const pairEnd = pairEndCandidate < 0 ? rawUrl.length : pairEndCandidate;
+    const separator = rawUrl.indexOf('=', pairStart);
+    if (separator >= pairStart && separator < pairEnd && rawUrl.slice(pairStart, separator) === key) {
+      const valueStart = separator + 1;
+      const rawValue = rawUrl.slice(valueStart, pairEnd);
+      const encoded = rawValue.replace(/\+/g, '%2B');
+      const value = encoded.replace(/%([0-9A-Fa-f]{2})/g, (_match, hex: string) =>
+        String.fromCharCode(Number.parseInt(hex, 16)));
+      return { rawValue, value, valueEnd: pairEnd, valueStart };
+    }
+    if (pairEndCandidate < 0) break;
+    pairStart = pairEnd + 1;
   }
   return null;
 }

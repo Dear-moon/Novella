@@ -6,6 +6,7 @@ import {
   COMMUNITY_STORAGE_KEYS,
   CommunitySpeechBlockedError,
   CommunitySpeechRulesUnavailableError,
+  createAnnouncementsUseCase,
   createBookSearchUseCase,
   createClientSessionController,
   createCommunitySpeechGuard,
@@ -265,6 +266,41 @@ test('reader preload marks chapter Hub work as cancellable preload priority', as
   ]]);
 });
 
+test('announcements load paged summaries and detail with validated identifiers', async () => {
+  const calls = [];
+  const useCase = createAnnouncementsUseCase({
+    async getAnnouncementList(request) {
+      calls.push(['page', request]);
+      return { items: [], page: request.page, totalPages: 0 };
+    },
+    async getAnnouncementDetail(id) {
+      calls.push(['detail', id]);
+      return {
+        id,
+        title: 'Service update',
+        createdAt: '2026-02-01T00:00:00.000Z',
+        contentHtml: '<p>Ready</p>',
+      };
+    },
+  });
+
+  await useCase.loadPage(2);
+  await useCase.loadPage(3, 12);
+  const detail = await useCase.loadDetail(7);
+
+  assert.equal(detail.id, 7);
+  assert.deepEqual(calls, [
+    ['page', { page: 2, size: 24 }],
+    ['page', { page: 3, size: 12 }],
+    ['detail', 7],
+  ]);
+
+  assert.throws(() => useCase.loadPage(0));
+  assert.throws(() => useCase.loadPage(1, 1.5));
+  assert.throws(() => useCase.loadDetail(-1));
+  assert.equal(calls.length, 3);
+});
+
 test('discovery exposes independently loadable home sections', async () => {
   const calls = [];
   const useCase = createDiscoveryUseCase({
@@ -390,7 +426,10 @@ test('history hydrates novel order and comic series independently', async () => 
       return { novelIds: [3, 2, 1], comicIds: [9, 8] };
     },
     async getBookListByIds(ids) {
-      return [...ids].reverse().map((id) => ({ id, title: `Book ${id}` }));
+      return [...ids]
+        .reverse()
+        .filter((id) => id !== 2)
+        .map((id) => ({ id, title: `Book ${id}` }));
     },
     async getComicSeriesByIds() {
       return {
@@ -409,8 +448,8 @@ test('history hydrates novel order and comic series independently', async () => 
     novelIds: [3, 2, 1],
     comicIds: [9, 8],
   });
-  const novels = await useCase.loadNovelPage([3, 2, 1], 1, 2);
-  assert.deepEqual(novels.items.map((item) => item.id), [3, 2]);
+  const novels = await useCase.loadNovelPage([3, 2, 1], 1, 3);
+  assert.deepEqual(novels.items.map((item) => item.id), [3, 1]);
   const comics = await useCase.loadComicPage([9, 8], 1, 24);
   assert.equal(comics.items.length, 1);
   await useCase.clear();
@@ -444,11 +483,11 @@ test('profile repository publishes refreshed avatar and check-in state', async (
     email: 'reader@example.com',
     inviteCode: 'INVITE',
     groupName: 'Member',
-    point: 0,
     unreadNotificationCount: 0,
     registeredAt: null,
     growth: {
       experience: 10,
+      coin: 0,
       level: 1,
       growthLevel: 1,
       currentLevelExperience: 0,

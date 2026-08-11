@@ -15,6 +15,7 @@ import {
   decodeUserProfile,
   extractBlurHashPlaceholder,
   normalizeBlurHash,
+  normalizeCoverUrl,
 } from './index.ts';
 
 test('decodes book details whose optional Web-Master text fields are empty', () => {
@@ -67,6 +68,7 @@ test('decodes the Web-Master profile and growth summary', () => {
     RegisterAt: '2026-01-02T00:00:00.000Z',
     Growth: {
       Exp: 180,
+      Coin: 96,
       Level: 4,
       GrowthLevel: 3,
       CurrentLevelExp: 150,
@@ -83,11 +85,11 @@ test('decodes the Web-Master profile and growth summary', () => {
     email: 'reader@example.com',
     inviteCode: 'INVITE',
     groupName: 'Member',
-    point: 320,
     unreadNotificationCount: 3,
     registeredAt: '2026-01-02T00:00:00.000Z',
     growth: {
       experience: 180,
+      coin: 96,
       level: 4,
       growthLevel: 3,
       currentLevelExperience: 150,
@@ -187,7 +189,7 @@ test('maps novel and comic search to their Web-Master Hub contracts', async () =
                 Id: 7,
                 Type: 'Novel',
                 Title: 'Novel result',
-                Cover: 'https://cdn.example/novel.jpg',
+                Cover: 'https://cdn.example/novel.jpg?placeholder=J8RyW#-=9sR:_NIq&t=signed',
                 UserName: '',
                 LastUpdatedAt: '2026-01-01T00:00:00.000Z',
                 Category: null,
@@ -204,7 +206,7 @@ test('maps novel and comic search to their Web-Master Hub contracts', async () =
               Id: 9,
               Title: 'Comic series',
               OriginalTitle: '',
-              Cover: 'https://cdn.example/comic.jpg',
+              Cover: 'https://cdn.example/comic.jpg?placeholder=J8RyW#-=9sR:_NIq&t=signed',
               Count: 2,
               LastUpdatedAt: '2026-01-02T00:00:00.000Z',
             }],
@@ -233,7 +235,15 @@ test('maps novel and comic search to their Web-Master Hub contracts', async () =
   const comicList = await client.getComicList({ page: 1, size: 24, order: 'view' });
 
   assert.equal(novels.items[0].title, 'Novel result');
+  assert.equal(
+    novels.items[0].coverUrl,
+    'https://cdn.example/novel.jpg?placeholder=J8RyW%23-=9sR:_NIq&t=signed',
+  );
   assert.equal(comics.items[0].title, 'Comic series');
+  assert.equal(
+    comics.items[0].coverUrl,
+    'https://cdn.example/comic.jpg?placeholder=J8RyW%23-=9sR:_NIq&t=signed',
+  );
   assert.equal(comics.items[0].originalTitle, null);
   assert.equal(comicList.items[0].chapterCount, 2);
   assert.equal(comicList.totalPages, 3);
@@ -264,6 +274,102 @@ test('maps novel and comic search to their Web-Master Hub contracts', async () =
       args: [{ Page: 1, Size: 24, Order: 'view' }, { UseGzip: true }],
     },
   ]);
+});
+
+test('maps announcement list and detail to their Web-Master Hub contracts', async () => {
+  const calls = [];
+  const client = new ApiClient(
+    { async request() { throw new Error('not used'); } },
+    {
+      async connect() {},
+      async close() {},
+      async invoke(method, args) {
+        calls.push({ method, args });
+        if (method === 'GetAnnouncementList') {
+          return {
+            Success: true,
+            Response: {
+              Page: 2,
+              TotalPages: 3,
+              Data: [{
+                Id: 7,
+                Title: 'Service update',
+                CreatedAt: '2026-02-01T00:00:00.000Z',
+                Content: '<p>List content</p>',
+              }],
+            },
+          };
+        }
+        return {
+          Success: true,
+          Response: {
+            Id: 7,
+            Title: 'Service update',
+            CreatedAt: '2026-02-01T00:00:00.000Z',
+            Content: '',
+          },
+        };
+      },
+    },
+    null,
+    new RateLimitRequestScheduler(20, 10),
+  );
+
+  const page = await client.getAnnouncementList({ page: 2, size: 24 });
+  const detail = await client.getAnnouncementDetail(7);
+
+  assert.equal(page.items[0].contentHtml, '<p>List content</p>');
+  assert.deepEqual(detail, {
+    id: 7,
+    title: 'Service update',
+    createdAt: '2026-02-01T00:00:00.000Z',
+    contentHtml: '',
+  });
+  assert.deepEqual(calls, [
+    {
+      method: 'GetAnnouncementList',
+      args: [{ Page: 2, Size: 24 }, { UseGzip: true }],
+    },
+    {
+      method: 'GetAnnouncementDetail',
+      args: [{ Id: 7 }, { UseGzip: true }],
+    },
+  ]);
+});
+
+test('book id batches omit unresolved placeholders but reject malformed books', async () => {
+  let response = [{
+    Id: 3,
+    Title: 'Available book',
+    Cover: 'cover.jpg',
+    LastUpdatedAt: '2026-01-02T00:00:00.000Z',
+  }, null];
+  const client = new ApiClient(
+    { async request() { throw new Error('not used'); } },
+    {
+      async connect() {},
+      async close() {},
+      async invoke() {
+        return { Success: true, Response: response };
+      },
+    },
+    null,
+    new RateLimitRequestScheduler(20, 10),
+  );
+
+  const books = await client.getBookListByIds([3, 2]);
+  assert.deepEqual(books.map((book) => book.id), [3]);
+
+  response = [{
+    Id: 3,
+    Title: null,
+    Cover: 'cover.jpg',
+    LastUpdatedAt: '2026-01-02T00:00:00.000Z',
+  }];
+  await assert.rejects(
+    () => client.getBookListByIds([3]),
+    /invalid text field/i,
+  );
 });
 
 test('decodes dual-format history and comic history hydration', async () => {
@@ -413,6 +519,50 @@ test('validates BlurHash characters, components, and cover URL extraction', () =
     'JCL|i+@;_3^J^i-W',
   );
   assert.equal(extractBlurHashPlaceholder('https://cdn.example/cover.jpg'), null);
+});
+
+test('repairs raw cover BlurHash fragments without dropping signed query parameters', () => {
+  const raw = 'https://img.lightnovel.life/images/001_md.jpg?placeholder=J8RyW#-=9sR:_NIq&t=cf0d7f';
+  const normalized = normalizeCoverUrl(raw);
+
+  assert.equal(
+    normalized,
+    'https://img.lightnovel.life/images/001_md.jpg?placeholder=J8RyW%23-=9sR:_NIq&t=cf0d7f',
+  );
+  assert.equal(extractBlurHashPlaceholder(normalized), 'J8RyW#-=9sR:_NIq');
+  const parsed = new URL(normalized);
+  assert.equal(parsed.hash, '');
+  assert.equal(parsed.searchParams.get('t'), 'cf0d7f');
+  const alreadyEncoded = 'https://img.example/cover.jpg?placeholder=J8RyW%23-%3d9sR%3a_NIq&t=abc';
+  assert.equal(normalizeCoverUrl(alreadyEncoded), alreadyEncoded);
+  assert.equal(
+    normalizeCoverUrl('https://img.example/cover.jpg?placeholder=invalid#hash&t=abc'),
+    'https://img.example/cover.jpg?placeholder=invalid%23hash&t=abc',
+  );
+  assert.equal(
+    extractBlurHashPlaceholder('https://img.example/cover.jpg?placeholder=invalid#hash&t=abc'),
+    null,
+  );
+});
+
+test('normalizes decoded detail cover URLs while preserving raw placeholders', () => {
+  const detail = decodeBookDetail({
+    Book: {
+      Id: 19138,
+      Cover: 'https://img.example/001_md.jpg?placeholder=J8RyW#-=9sR:_NIq&t=signed',
+      Title: 'Book',
+      LastUpdatedAt: '2026-08-09T00:00:00.000Z',
+      CreatedAt: '2026-08-01T00:00:00.000Z',
+      Chapter: [],
+      User: { Id: 1, UserName: 'uploader', Avatar: '' },
+    },
+  });
+
+  assert.equal(
+    detail.coverUrl,
+    'https://img.example/001_md.jpg?placeholder=J8RyW%23-=9sR:_NIq&t=signed',
+  );
+  assert.equal(detail.coverPlaceholder, 'J8RyW#-=9sR:_NIq');
 });
 
 test('drops invalid comic BlurHash placeholders at the API boundary', () => {

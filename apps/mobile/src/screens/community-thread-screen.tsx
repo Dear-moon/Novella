@@ -9,10 +9,10 @@ import {
 } from '@tabler/icons-react-native';
 import { router, Stack, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { ReactNode } from 'react';
 import {
   FlatList,
-  Platform,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -20,7 +20,6 @@ import {
   View,
 } from 'react-native';
 import {
-  ActivityIndicator,
   Avatar,
   Button,
   MD3DarkTheme,
@@ -37,9 +36,11 @@ import {
   CommentThreadRow,
   type CommentThreadPalette,
 } from '@/components/comment-thread';
+import { CommentThreadSkeleton } from '@/components/comment-thread-item';
 import { CommunitySectionTitle, CommunityThreadSkeleton } from '@/components/community/community-ui';
 import { NativeScreenScaffold } from '@/components/native-screen-scaffold';
 import { useCommunityThread } from '@/hooks/use-community-thread';
+import { useAppLocale } from '@/localization/localization-provider';
 import { communitySpeechGuard } from '@/services/client';
 import { consumeCommunityThreadChanged } from '@/services/community-reply-events';
 import { findCommunityReply, formatCommunityTime } from '@/services/community-utils';
@@ -58,6 +59,8 @@ export function CommunityThreadScreen({
 }) {
   const styles = useCommunityThreadStyles();
   const { colorScheme, colors } = useAppTheme();
+  const { t } = useTranslation('community');
+  const locale = useAppLocale();
   const basePaperTheme = colorScheme === 'dark' ? MD3DarkTheme : MD3LightTheme;
   // Map paper's M3 color roles onto the app theme so contained buttons,
   // contained-tonal (selected) buttons and the reply input's focus outline
@@ -130,7 +133,7 @@ export function CommunityThreadScreen({
 
   const thread = state.thread;
   const canReply = Boolean(thread && !thread.locked && speechReady && !speechDisabled);
-  const title = thread?.boardName || initialTitle || 'Discussion';
+  const title = thread?.boardName || initialTitle || t('navigation.discussion');
 
   function openReply(reply: CommunityThreadReply | null) {
     if (!canReply) return;
@@ -151,21 +154,21 @@ export function CommunityThreadScreen({
         <View style={styles.chips}>
           <ThreadTagPill label={thread.boardName} variant="accent" />
           {thread.subCategoryLabel ? <ThreadTagPill label={thread.subCategoryLabel} variant="neutral" /> : null}
-          {thread.locked ? <ThreadTagPill label="Locked" variant="warning" /> : null}
+          {thread.locked ? <ThreadTagPill label={t('labels.locked')} variant="warning" /> : null}
         </View>
         <View style={styles.postBody}>
           <Text style={styles.title}>{thread.title}</Text>
           <View style={styles.authorRow}>
             <ThreadAvatar
               avatarUrl={thread.authorAvatar}
-              name={thread.authorIsDeleted ? 'Deleted user' : thread.authorName}
+              name={thread.authorIsDeleted ? t('labels.deletedUser') : thread.authorName || t('labels.unknownUser')}
               size={38}
             />
             <View style={styles.authorCopy}>
               <Text style={styles.authorName}>
-                {thread.authorIsDeleted ? 'Deleted user' : thread.authorName || 'Unknown user'}
+                {thread.authorIsDeleted ? t('labels.deletedUser') : thread.authorName || t('labels.unknownUser')}
               </Text>
-              <Text style={styles.time}>{formatCommunityTime(thread.publishedAt)}</Text>
+              <Text style={styles.time}>{formatCommunityTime(thread.publishedAt, locale)}</Text>
             </View>
           </View>
           <View style={styles.html}>
@@ -174,7 +177,7 @@ export function CommunityThreadScreen({
         </View>
         <View style={styles.actions}>
           <Button
-            accessibilityLabel={thread.liked ? 'Unlike discussion' : 'Like discussion'}
+            accessibilityLabel={thread.liked ? t('accessibility.unlikeDiscussion') : t('accessibility.likeDiscussion')}
             disabled={thread.locked || state.threadActionId !== null}
             icon={({ size, color }) => (
               <IconHeart color={color} size={size} strokeWidth={2} />
@@ -186,7 +189,7 @@ export function CommunityThreadScreen({
             {thread.likes}
           </Button>
           <Button
-            accessibilityLabel={thread.favorited ? 'Remove favorite' : 'Add favorite'}
+            accessibilityLabel={thread.favorited ? t('accessibility.removeFavorite') : t('accessibility.addFavorite')}
             disabled={thread.locked || state.threadActionId !== null}
             icon={({ size, color }) => (
               <IconBookmark color={color} size={size} strokeWidth={2} />
@@ -206,7 +209,7 @@ export function CommunityThreadScreen({
             onPress={() => openReply(null)}
             style={styles.actionButton}
           >
-            Reply
+            {t('actions.reply')}
           </Button>
         </View>
       </Surface>
@@ -214,21 +217,21 @@ export function CommunityThreadScreen({
       {thread.locked ? (
         <ThreadNotice
           icon={<IconLock color={colors.secondaryLabel as string} size={20} strokeWidth={2} />}
-          text="This discussion is locked and no longer accepts reactions or replies."
+          text={t('thread.lockedNotice')}
         />
       ) : speechDisabled ? (
         <ThreadNotice
           icon={<IconLock color={colors.secondaryLabel as string} size={20} strokeWidth={2} />}
-          text="Community posting is disabled on this device. Reading remains available."
+          text={t('thread.postingDisabledNotice')}
         />
       ) : null}
 
-      <CommunitySectionTitle title={`Replies · ${thread.repliesPage.total}`} />
+      <CommunitySectionTitle title={t('thread.replies', { count: thread.repliesPage.total })} />
       {state.error ? (
         <ThreadStateCard
           description={state.error}
           onRetry={retry}
-          title="Community action failed"
+          title={t('thread.actionFailed')}
           variant="error"
         />
       ) : null}
@@ -238,23 +241,20 @@ export function CommunityThreadScreen({
   const footer = thread ? (
     <View style={styles.footer}>
       {state.loadingMore ? (
-        <View style={styles.footerSpinner}>
-          <ActivityIndicator color={colors.accent as string} />
+        <View style={styles.footerSkeleton}>
+          <CommentThreadSkeleton palette={commentPalette} rows={2} />
         </View>
+      ) : state.loadMoreError ? (
+        <ThreadStateCard
+          description={state.loadMoreError}
+          onRetry={() => void loadMore()}
+          title={t('thread.actionFailed')}
+          variant="error"
+        />
       ) : null}
-      {thread.repliesPage.hasMore ? (
-        <Button
-          disabled={state.loadingMore}
-          mode="outlined"
-          onPress={() => void loadMore()}
-          style={styles.footerButton}
-        >
-          Load more replies
-        </Button>
-      ) : null}
-      {thread.relatedThreads.length > 0 ? (
+      {!thread.repliesPage.hasMore && thread.relatedThreads.length > 0 ? (
         <View style={styles.related}>
-          <CommunitySectionTitle title="Related Discussions" />
+          <CommunitySectionTitle title={t('thread.related')} />
           {thread.relatedThreads.map((item) => (
             <RelatedThreadCard
               item={item}
@@ -284,19 +284,22 @@ export function CommunityThreadScreen({
             <FlatList
               ListEmptyComponent={
                 state.loading ? (
-                  <View style={styles.loading}><CommunityThreadSkeleton /></View>
+                  <View style={styles.loading}>
+                    <CommunityThreadSkeleton />
+                    <CommentThreadSkeleton palette={commentPalette} rows={2} />
+                  </View>
                 ) : state.error && !thread ? (
-                  <ThreadStateCard description={state.error} onRetry={retry} title="Unable to load Discussion" variant="error" />
+                  <ThreadStateCard description={state.error} onRetry={retry} title={t('thread.errors.loadTitle')} variant="error" />
                 ) : thread ? (
                   <ThreadStateCard
-                    description="Be the first person to reply."
-                    title="No replies yet"
+                    description={t('thread.empty.noRepliesDescription')}
+                    title={t('thread.empty.noRepliesTitle')}
                     variant="empty"
                   />
                 ) : (
                   <ThreadStateCard
-                    description="This discussion may have been removed."
-                    title="Discussion unavailable"
+                    description={t('thread.empty.unavailableDescription')}
+                    title={t('thread.empty.unavailableTitle')}
                     variant="empty"
                   />
                 )
@@ -310,6 +313,8 @@ export function CommunityThreadScreen({
               keyExtractor={(item) => String(item.id)}
               keyboardDismissMode="interactive"
               nestedScrollEnabled
+              onEndReached={() => void loadMore()}
+              onEndReachedThreshold={0.35}
               onScrollToIndexFailed={({ index }) => {
                 setTimeout(() => listRef.current?.scrollToIndex({ animated: true, index, viewPosition: 0.2 }), 200);
               }}
@@ -427,6 +432,7 @@ function ThreadStateCard({
 }) {
   const styles = useCommunityThreadStyles();
   const { colors } = useAppTheme();
+  const { t: tCommon } = useTranslation('common');
   const Icon = variant === 'error' ? IconAlertCircle : IconMessages;
   return (
     <Surface elevation={0} style={styles.stateCard}>
@@ -451,7 +457,7 @@ function ThreadStateCard({
             onPress={onRetry}
             style={styles.stateRetry}
           >
-            Try again
+            {tCommon('actions.retry')}
           </Button>
         ) : null}
       </View>
@@ -515,9 +521,11 @@ function ReplyCard({
   reply: CommunityThreadReply;
 }) {
   const styles = useCommunityThreadStyles();
+  const { t } = useTranslation('community');
+  const locale = useAppLocale();
   const hasChildren = reply.childReplies.length > 0 || reply.childPage.hasMore;
   const replyToName = reply.replyTo
-    ? (reply.replyTo.authorIsDeleted ? 'Deleted user' : reply.replyTo.authorName)
+    ? (reply.replyTo.authorIsDeleted ? t('labels.deletedUser') : reply.replyTo.authorName)
     : null;
 
   return (
@@ -528,7 +536,7 @@ function ReplyCard({
         badge={reply.authorBadge}
         canReply={canReply}
         content={reply.content}
-        createdAtLabel={formatCommunityTime(reply.publishedAt)}
+        createdAtLabel={formatCommunityTime(reply.publishedAt, locale)}
         deleted={reply.authorIsDeleted}
         highlighted={highlightedReplyId === reply.id}
         horizontalInset={0}
@@ -547,7 +555,7 @@ function ReplyCard({
         <CommentThreadChildren horizontalInset={0} palette={palette}>
           {reply.childReplies.map((child) => {
             const childReplyToName = child.replyTo
-              ? (child.replyTo.authorIsDeleted ? 'Deleted user' : child.replyTo.authorName)
+              ? (child.replyTo.authorIsDeleted ? t('labels.deletedUser') : child.replyTo.authorName)
               : null;
             return (
               <CommentThreadRow
@@ -556,7 +564,7 @@ function ReplyCard({
                 badge={child.authorBadge}
                 canReply={canReply}
                 content={child.content}
-                createdAtLabel={formatCommunityTime(child.publishedAt)}
+                createdAtLabel={formatCommunityTime(child.publishedAt, locale)}
                 deleted={child.authorIsDeleted}
                 highlighted={highlightedReplyId === child.id}
                 key={child.id}
@@ -582,7 +590,7 @@ function ReplyCard({
               onPress={() => onLoadChildren(reply)}
               style={styles.childMoreButton}
             >
-              {reply.childReplies.length > 0 ? 'Load more replies' : 'Show replies'}
+              {reply.childReplies.length > 0 ? t('actions.loadMoreReplies') : t('actions.showReplies')}
             </Button>
           ) : null}
         </CommentThreadChildren>
@@ -617,11 +625,10 @@ const useCommunityThreadStyles = createThemedStyles((colors) => ({
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 14, paddingTop: 14 },
   content: { paddingBottom: 42, paddingHorizontal: 16 },
   footer: { gap: 16, paddingTop: 16 },
-  footerButton: { alignSelf: 'center' },
-  footerSpinner: { alignItems: 'center', paddingVertical: 4 },
+  footerSkeleton: { gap: 8 },
   header: { gap: 14, paddingBottom: 14 },
   html: { marginTop: 6 },
-  loading: { paddingTop: 14 },
+  loading: { gap: 8, paddingTop: 14 },
   noticeBody: { alignItems: 'center', flexDirection: 'row', gap: 10, padding: 14 },
   noticeCard: {
     backgroundColor: colors.card,

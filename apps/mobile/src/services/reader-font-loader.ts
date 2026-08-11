@@ -25,11 +25,6 @@ export function loadReaderFont(family: string, fontUrl: string): Promise<string>
 
   const pending = loadReaderFontInternal(family, fontUrl).catch((error: unknown) => {
     readerFontCache.delete(fontUrl);
-    console.info('[ReaderFont] failed', {
-      family,
-      url: fontUrl,
-      error: error instanceof Error ? error.message : String(error),
-    });
     throw error;
   });
   readerFontCache.set(fontUrl, pending);
@@ -61,19 +56,28 @@ export function invisibleCodepointsForReaderFont(family: string): ReadonlySet<nu
  * handle the missing font).
  */
 export function readerFontDataUrl(fontUrl: string | null | undefined): string | null {
-  const resolved = resolveReaderFontUrl(fontUrl);
-  if (!resolved) return null;
-  const cacheKey = hashFontUrl(resolved);
-  const woff2File = new FileSystem.File(readerFontCacheDirectory, `${cacheKey}.woff2`);
-  if (!woff2File.exists || (woff2File.size ?? 0) < 4) return null;
+  const file = readerFontFile(fontUrl);
+  if (!file) return null;
   try {
-    const bytes = woff2File.bytesSync();
-    if (!isWoff2Bytes(bytes)) return null;
+    const bytes = file.bytesSync();
     const buffer = bytes.buffer.slice(
       bytes.byteOffset,
       bytes.byteOffset + bytes.byteLength,
     ) as ArrayBuffer;
     return `data:font/woff2;base64,${arrayBufferToBase64(buffer)}`;
+  } catch {
+    return null;
+  }
+}
+
+/** Returns the verified cached WOFF2 file for publication materialization. */
+export function readerFontFile(fontUrl: string | null | undefined): FileSystem.File | null {
+  const resolved = resolveReaderFontUrl(fontUrl);
+  if (!resolved) return null;
+  const cacheKey = hashFontUrl(resolved);
+  const file = new FileSystem.File(readerFontCacheDirectory, `${cacheKey}.woff2`);
+  try {
+    return isWoff2File(file) ? file : null;
   } catch {
     return null;
   }
@@ -90,9 +94,7 @@ export function clearReaderFontCache(): number {
 }
 
 async function loadReaderFontInternal(family: string, url: string): Promise<string> {
-  console.info('[ReaderFont] loading', { family, url });
-  const woff2File = await getCachedFontFile(url);
-  console.info('[ReaderFont] cached WOFF2', { uri: woff2File.uri, bytes: woff2File.size });
+  await getCachedFontFile(url);
   return family;
 }
 
@@ -101,24 +103,19 @@ async function getCachedFontFile(url: string): Promise<FileSystem.File> {
 
   const cacheKey = hashFontUrl(url);
   const woff2File = new FileSystem.File(readerFontCacheDirectory, `${cacheKey}.woff2`);
-  if (woff2File.exists && isWoff2File(woff2File)) {
-    console.info('[ReaderFont] using cached WOFF2', { uri: woff2File.uri });
-    return woff2File;
-  }
+  if (woff2File.exists && isWoff2File(woff2File)) return woff2File;
   if (woff2File.exists) woff2File.delete();
 
   // Drop any legacy TTF produced by the previous conversion pipeline.
   const legacyTtf = new FileSystem.File(readerFontCacheDirectory, `${cacheKey}.ttf`);
   if (legacyTtf.exists) legacyTtf.delete();
 
-  console.info('[ReaderFont] downloading WOFF2', { url });
   const downloaded = await downloadFont(url, `${cacheKey}.woff2`);
   const bytes = downloaded.bytesSync();
   if (!isWoff2Bytes(bytes)) {
     downloaded.delete();
     throw new Error('Reader font is not a WOFF2 file');
   }
-  console.info('[ReaderFont] downloaded WOFF2', { bytes: bytes.byteLength });
   return downloaded;
 }
 

@@ -11,8 +11,10 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
 
 import { BookDetailThemeProvider } from '@/components/book-detail-theme-provider';
+import { AppLocalizationProvider } from '@/localization/localization-provider';
 import { NativeAlertHost } from '@/components/native-alert-dialog';
 import { useAuthentication } from '@/hooks/use-authentication';
 import { hasStoredSession, startClient } from '@/services/client';
@@ -29,14 +31,18 @@ const sessionProbe = Promise.all([hasStoredSession(), loadAppSettings()]);
 
 export default function RootLayout() {
   return (
-    <AppThemeProvider>
-      <RootLayoutContent />
-    </AppThemeProvider>
+    <AppLocalizationProvider>
+      <AppThemeProvider>
+        <RootLayoutContent />
+      </AppThemeProvider>
+    </AppLocalizationProvider>
   );
 }
 
 function RootLayoutContent() {
   const authentication = useAuthentication();
+  const { t } = useTranslation('navigation');
+  const { t: tAuth } = useTranslation('auth');
   const { colorScheme, colors } = useAppTheme();
   const systemScreenStackPreset = useSystemScreenStackPreset();
   const usesComposeBottomSheets = process.env.EXPO_OS === 'android';
@@ -103,16 +109,22 @@ function RootLayoutContent() {
             options={{
               headerLargeTitle: !usesComposeBottomSheets,
               headerShown: !usesComposeBottomSheets,
-              title: 'Search',
+              title: t('routes.search'),
             }}
           />
-          <Stack.Screen name="book/[id]/comments" options={{ headerShown: !usesComposeBottomSheets, title: 'Comments' }} />
-          <Stack.Screen name="books" options={{ headerShown: !usesComposeBottomSheets, title: 'All novels' }} />
-          <Stack.Screen name="comics" options={{ headerShown: !usesComposeBottomSheets, title: 'All comics' }} />
-          <Stack.Screen name="ranking" options={{ headerShown: !usesComposeBottomSheets, title: 'Rankings' }} />
+          <Stack.Screen name="book/[id]/comments" options={{ headerShown: !usesComposeBottomSheets, title: t('routes.comments') }} />
+          <Stack.Screen name="announcements" options={{ headerShown: !usesComposeBottomSheets, title: t('routes.announcements') }} />
+          <Stack.Screen name="announcement/[source]/[id]" options={{ headerShown: !usesComposeBottomSheets, title: t('routes.announcementDetail') }} />
+          <Stack.Screen name="books" options={{ headerShown: !usesComposeBottomSheets, title: t('routes.allNovels') }} />
+          <Stack.Screen name="comics" options={{ headerShown: !usesComposeBottomSheets, title: t('routes.allComics') }} />
+          <Stack.Screen name="ranking" options={{ headerShown: !usesComposeBottomSheets, title: t('routes.rankings') }} />
           <Stack.Screen
             name="shelf/folder"
-            options={{ headerShown: !usesComposeBottomSheets, title: 'Folder' }}
+            options={{
+              headerLargeTitle: false,
+              headerShown: !usesComposeBottomSheets,
+              title: t('routes.folder'),
+            }}
           />
           <Stack.Screen
             name="shelf/manage"
@@ -125,6 +137,23 @@ function RootLayoutContent() {
                 : {
                     sheetAllowedDetents: 'fitToContents',
                     sheetGrabberVisible: true,
+                  }),
+              headerShown: false,
+              presentation: usesComposeBottomSheets ? 'transparentModal' : 'formSheet',
+              title: '',
+            }}
+          />
+          <Stack.Screen
+            name="announcement/comment-compose"
+            options={{
+              ...(usesComposeBottomSheets
+                ? {
+                    animation: 'none',
+                    contentStyle: { backgroundColor: 'transparent' },
+                  }
+                : {
+                    sheetAllowedDetents: 'fitToContents',
+                    sheetGrabberVisible: false,
                   }),
               headerShown: false,
               presentation: usesComposeBottomSheets ? 'transparentModal' : 'formSheet',
@@ -237,7 +266,7 @@ function RootLayoutContent() {
                   }),
               headerShown: false,
               presentation: usesComposeBottomSheets ? 'transparentModal' : 'formSheet',
-              title: 'Chapters',
+              title: t('routes.chapters'),
             }}
           />
           <Stack.Screen
@@ -255,7 +284,7 @@ function RootLayoutContent() {
                   }),
               headerShown: false,
               presentation: usesComposeBottomSheets ? 'transparentModal' : 'formSheet',
-              title: 'Reading',
+              title: t('routes.reading'),
             }}
           />
           <Stack.Screen
@@ -273,18 +302,18 @@ function RootLayoutContent() {
                   }),
               headerShown: false,
               presentation: usesComposeBottomSheets ? 'transparentModal' : 'formSheet',
-              title: 'Footnote',
+              title: t('routes.footnote'),
             }}
           />
           </Stack.Protected>
           <Stack.Protected guard={!hasAuthenticatedSession}>
             <Stack.Screen name="sign-in" options={{ headerShown: false }} />
-            <Stack.Screen name="sign-in/credentials" options={{ title: 'Sign in' }} />
-            <Stack.Screen name="register" options={{ title: 'Create account' }} />
-            <Stack.Screen name="register/verify" options={{ title: 'Verify email' }} />
-            <Stack.Screen name="reset-password" options={{ title: 'Reset password' }} />
-            <Stack.Screen name="reset-password/verify" options={{ title: 'Verify email' }} />
-            <Stack.Screen name="reset-password/new-password" options={{ title: 'New password' }} />
+            <Stack.Screen name="sign-in/credentials" options={{ headerShown: !usesComposeBottomSheets, title: tAuth('navigation.signIn') }} />
+            <Stack.Screen name="register" options={{ headerShown: !usesComposeBottomSheets, title: tAuth('navigation.register') }} />
+            <Stack.Screen name="register/verify" options={{ headerShown: !usesComposeBottomSheets, title: tAuth('navigation.register') }} />
+            <Stack.Screen name="reset-password" options={{ headerShown: !usesComposeBottomSheets, title: tAuth('navigation.recover') }} />
+            <Stack.Screen name="reset-password/verify" options={{ headerShown: !usesComposeBottomSheets, title: tAuth('navigation.recover') }} />
+            <Stack.Screen name="reset-password/new-password" options={{ headerShown: !usesComposeBottomSheets, title: tAuth('navigation.recover') }} />
           </Stack.Protected>
         </Stack>
       <NativeAlertHost />

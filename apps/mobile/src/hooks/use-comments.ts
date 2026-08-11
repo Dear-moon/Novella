@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { ApiError, type CommentPage, type PostCommentRequest } from '@novella/api-client';
 
 import { comments } from '@/services/client';
+import type { CommentTarget } from '@/services/comment-target';
 import { waitForMinimumDisplay } from '@/services/min-skeleton-display';
 
 interface CommentsState {
@@ -21,7 +23,13 @@ const initialState: CommentsState = {
   page: null,
 };
 
-export function useComments(bookId: number) {
+export function useComments(target: CommentTarget) {
+  const { t } = useTranslation('community');
+  const { id, seriesTitle, type } = target;
+  const localizeError = useCallback(
+    (error: unknown) => getCommentErrorMessage(error, (key) => t(key)),
+    [t],
+  );
   const [state, setState] = useState<CommentsState>(initialState);
   // Kept up to date so load() (stabilized on [bookId]) can decide whether the
   // skeleton is on screen without being recreated on every state change.
@@ -40,7 +48,12 @@ export function useComments(bookId: number) {
       isLoadingMore: append,
     }));
     try {
-      const next = await comments.load({ type: 'Book', id: bookId, page: pageNumber });
+      const next = await comments.load({
+        type,
+        id,
+        page: pageNumber,
+        ...(seriesTitle === undefined ? {} : { seriesTitle }),
+      });
       if (showSkeleton) await waitForMinimumDisplay(startedAt);
       setState((current) => ({
         ...current,
@@ -57,13 +70,13 @@ export function useComments(bookId: number) {
       if (showSkeleton) await waitForMinimumDisplay(startedAt);
       setState((current) => ({
         ...current,
-        error: getCommentErrorMessage(error),
+        error: localizeError(error),
         isLoading: false,
         isLoadingMore: false,
       }));
       return null;
     }
-  }, [bookId]);
+  }, [id, localizeError, seriesTitle, type]);
 
   useEffect(() => {
     void load();
@@ -79,12 +92,12 @@ export function useComments(bookId: number) {
     } catch (error) {
       setState((current) => ({
         ...current,
-        error: getCommentErrorMessage(error),
+        error: localizeError(error),
         isMutating: false,
       }));
       return false;
     }
-  }, [load]);
+  }, [load, localizeError]);
 
   const refresh = useCallback(() => load(1, false, true), [load]);
 
@@ -115,8 +128,8 @@ export function useComments(bookId: number) {
         setState((current) => ({
           ...current,
           error: operationError === null
-            ? getCommentErrorMessage(new Error('The comment list could not be refreshed.'))
-            : getCommentErrorMessage(operationError),
+            ? t('comments.errors.refresh')
+            : localizeError(operationError),
           isMutating: false,
         }));
         return;
@@ -129,12 +142,12 @@ export function useComments(bookId: number) {
         // delete succeeded (ignore the bogus invoke error); if it is still
         // there the delete really failed.
         error: operationError !== null && stillPresent
-          ? getCommentErrorMessage(operationError)
+          ? localizeError(operationError)
           : null,
         isMutating: false,
       }));
     })();
-  }, [load]);
+  }, [load, localizeError, t]);
 
   return {
     ...state,
@@ -144,7 +157,12 @@ export function useComments(bookId: number) {
       void load(state.page.page + 1, true);
     },
     postComment: (content: string) =>
-      mutate(() => comments.post({ type: 'Book', id: bookId, content })),
+      mutate(() => comments.post({
+        type,
+        id,
+        content,
+        ...(seriesTitle === undefined ? {} : { seriesTitle }),
+      })),
     refresh,
     replyToComment: (
       content: string,
@@ -152,9 +170,10 @@ export function useComments(bookId: number) {
       replyId?: number,
     ) => {
       const request: PostCommentRequest = {
-        type: 'Book',
-        id: bookId,
+        type,
+        id,
         content,
+        ...(seriesTitle === undefined ? {} : { seriesTitle }),
         parentId,
         ...(replyId === undefined ? {} : { replyId }),
       };
@@ -163,11 +182,19 @@ export function useComments(bookId: number) {
   };
 }
 
-function getCommentErrorMessage(error: unknown): string {
+type CommentErrorKey =
+  | 'comments.errors.authUse'
+  | 'comments.errors.offlineLoad'
+  | 'comments.errors.load';
+
+function getCommentErrorMessage(
+  error: unknown,
+  translate: (key: CommentErrorKey) => string,
+): string {
   if (error instanceof ApiError) {
-    if (error.category === 'auth') return 'Sign in again to use comments.';
-    if (error.category === 'network') return 'Comments are unavailable while offline.';
+    if (error.category === 'auth') return translate('comments.errors.authUse');
+    if (error.category === 'network') return translate('comments.errors.offlineLoad');
     return error.message;
   }
-  return 'Comments could not be loaded.';
+  return translate('comments.errors.load');
 }

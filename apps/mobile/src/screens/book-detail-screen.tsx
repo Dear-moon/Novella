@@ -1,5 +1,6 @@
 import { router } from 'expo-router';
 import { SkeletonGroup } from 'heroui-native';
+import { useTranslation } from 'react-i18next';
 import {
   useCallback,
   useRef,
@@ -25,6 +26,7 @@ import Animated, {
   useAnimatedRef,
   useAnimatedStyle,
   useScrollViewOffset,
+  type AnimatedRef,
   type SharedValue,
 } from 'react-native-reanimated';
 import {
@@ -46,13 +48,21 @@ import {
   IconProgressBolt,
 } from '@tabler/icons-react-native';
 
-import type { BookDetail } from '@novella/api-client';
+import {
+  normalizeCoverUrl,
+  type BookDetail,
+} from '@novella/api-client';
 
 import { BookCoverImage } from '@/components/book-cover-image';
 import { BookDetailNavigation } from '@/components/book-detail-navigation';
 import { useBookDetailRouteTheme } from '@/components/book-detail-theme-provider';
 import { BookHtmlContent } from '@/components/book-html-content';
-import { useBookDetail } from '@/hooks/use-book-detail';
+import {
+  useBookDetail,
+  type BookUserMessage,
+} from '@/hooks/use-book-detail';
+import { formatCompactNumber, formatRelativeTime } from '@/localization/formatters';
+import { useAppLocale } from '@/localization/localization-provider';
 import { simplifyReaderChapterTitle } from '@/services/chapter-title';
 import {
   BOOK_SEARCH_ROUTE,
@@ -95,13 +105,22 @@ export function BookDetailScreen({
     shelfError,
     toggleShelf,
   } = useBookDetail(bookId, bookType ?? 'Novel');
-  const hintedCoverUrl = initialCoverUrl?.trim() ? initialCoverUrl : null;
+  const hintedCoverUrl = initialCoverUrl?.trim()
+    ? normalizeCoverUrl(initialCoverUrl)
+    : null;
+  // Keep the list cover URL stable in detail so expo-image can reuse the same
+  // decoded/cache entry. Routes without a cover hint fall back to detail data.
   const coverUrl = hintedCoverUrl ?? book?.coverUrl ?? null;
   const coverPlaceholder = hintedCoverUrl
     ? initialCoverPlaceholder ?? book?.coverPlaceholder ?? null
     : book?.coverPlaceholder ?? null;
   const detailTheme = useBookDetailRouteTheme(bookId, coverUrl, coverPlaceholder);
   const [usesSoftScrollEdge, setUsesSoftScrollEdge] = useState(false);
+  const displayBook = book ?? createLoadingBookDetail({
+    bookId,
+    coverUrl,
+    ...(initialTitle === undefined ? {} : { initialTitle }),
+  });
   const seriesTitle = (initialTitle?.trim() || book?.title) ?? null;
 
   return (
@@ -112,14 +131,6 @@ export function BookDetailScreen({
           palette={detailTheme.palette}
           {...(seriesTitle === null ? {} : { seriesTitle })}
         />
-        {isLoading ? (
-          <BookDetailLoading
-            coverPlaceholder={coverPlaceholder}
-            coverUrl={coverUrl}
-            initialTitle={initialTitle?.trim() || null}
-            palette={detailTheme.palette}
-          />
-        ) : null}
         {error ? (
           <BookDetailError
             error={error}
@@ -127,14 +138,14 @@ export function BookDetailScreen({
             palette={detailTheme.palette}
             requiresAuth={requiresAuth}
           />
-        ) : null}
-        {book ? (
+        ) : (
           <BookDetailContent
-            book={book}
+            book={displayBook}
             {...(bookType === undefined ? {} : { bookType })}
             coverPlaceholder={coverPlaceholder}
             coverUrl={coverUrl}
             isInShelf={isInShelf}
+            isLoading={isLoading}
             usesSoftScrollEdge={usesSoftScrollEdge}
             isShelfLoading={isShelfLoading}
             onToggleShelf={toggleShelf}
@@ -142,10 +153,41 @@ export function BookDetailScreen({
             palette={detailTheme.palette}
             shelfError={shelfError}
           />
-        ) : null}
+        )}
       </View>
     </PaperProvider>
   );
+}
+
+function createLoadingBookDetail({
+  bookId,
+  coverUrl,
+  initialTitle,
+}: {
+  bookId: number;
+  coverUrl: string | null;
+  initialTitle?: string;
+}): BookDetail {
+  return {
+    id: bookId,
+    type: null,
+    coverUrl: coverUrl ?? '',
+    coverPlaceholder: null,
+    title: initialTitle?.trim() ?? '',
+    authorName: null,
+    category: null,
+    introduction: '',
+    lastUpdatedChapter: null,
+    lastUpdatedAt: '',
+    createdAt: '',
+    favoriteCount: 0,
+    viewCount: 0,
+    canEdit: false,
+    chapters: [],
+    user: null,
+    classification: { author: null, seriesName: null, seriesNameCn: null, tags: [] },
+    readPosition: null,
+  };
 }
 
 function BookDetailContent({
@@ -154,6 +196,7 @@ function BookDetailContent({
   coverPlaceholder,
   coverUrl,
   isInShelf,
+  isLoading,
   usesSoftScrollEdge,
   isShelfLoading,
   onToggleShelf,
@@ -166,13 +209,16 @@ function BookDetailContent({
   coverPlaceholder: string | null;
   coverUrl: string | null;
   isInShelf: boolean;
+  isLoading: boolean;
   usesSoftScrollEdge: boolean;
   isShelfLoading: boolean;
   onToggleShelf: () => Promise<void>;
   onScrollEdgeChange: (usesSoftScrollEdge: boolean) => void;
   palette: BookDetailPalette;
-  shelfError: string | null;
+  shelfError: BookUserMessage | null;
 }) {
+  const { t } = useTranslation('book');
+  const locale = useAppLocale();
   const { bottom: bottomInset, top: topInset } = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const scrollRef = useAnimatedRef<Animated.ScrollView>();
@@ -185,8 +231,8 @@ function BookDetailContent({
   const searchFormat = book.type === 'Comic' || bookType === 'Comic' ? 'Comic' : 'Novel';
   const titleSearchTarget = resolveBookQuickSearch(book, 'title', settings.seriesSearchMode);
   const titleSearchAccessibilityLabel = titleSearchTarget?.mode === 'name'
-    ? `Search for series ${titleSearchTarget.query}`
-    : `Search for ${book.title.trim()}`;
+    ? t('detail.searchSeries', { query: titleSearchTarget.query })
+    : t('detail.searchTitle', { title: book.title.trim() });
   const handleQuickSearch = useCallback((target: BookQuickSearchTarget) => {
     const searchTarget = resolveBookQuickSearch(book, target, settings.seriesSearchMode);
     if (searchTarget === null) return;
@@ -203,6 +249,8 @@ function BookDetailContent({
     : null;
   const startSortNum = currentSortNum ?? 1;
   const latestChapter = book.chapters.at(-1)?.title ?? book.lastUpdatedChapter;
+  const isIos = process.env.EXPO_OS === 'ios';
+  const heroHeight = BOOK_HERO_HEIGHT + topInset;
   const usesCollapsibleAppBar = process.env.EXPO_OS === 'android';
   const usesSoftScrollEdgeRef = useRef(usesSoftScrollEdge);
   const handleScroll = useCallback((offsetY: number) => {
@@ -218,13 +266,21 @@ function BookDetailContent({
   }, [onScrollEdgeChange]);
 
   return (
-    <View style={styles.detailContent}>
+    <View style={[styles.detailContent, { backgroundColor: palette.surface }]}>
+      {isIos ? (
+        <CollapsingBookHeroBackdrop
+          maxHeight={heroHeight}
+          minHeight={BOOK_HERO_TOOLBAR_HEIGHT + topInset}
+          palette={palette}
+          scrollOffset={scrollOffset}
+        />
+      ) : null}
       <ScrollViewMarker
         scrollEdgeEffects={{ top: usesSoftScrollEdge ? 'soft' : 'hidden' }}
         style={styles.scrollViewMarker}
       >
         <Animated.ScrollView
-          bounces={false}
+          bounces={isIos}
           contentInsetAdjustmentBehavior="never"
           onScroll={({ nativeEvent }: NativeSyntheticEvent<NativeScrollEvent>) =>
             handleScroll(nativeEvent.contentOffset.y)
@@ -233,7 +289,7 @@ function BookDetailContent({
           ref={scrollRef}
           scrollEventThrottle={16}
           showsVerticalScrollIndicator={false}
-          style={{ backgroundColor: palette.surface }}
+          style={{ backgroundColor: isIos ? 'transparent' : palette.surface }}
         >
           {usesCollapsibleAppBar ? (
             <View style={{ height: BOOK_HERO_HEIGHT + topInset }} />
@@ -243,6 +299,7 @@ function BookDetailContent({
               coverPlaceholder={coverPlaceholder}
               coverUrl={coverUrl}
               horizontalPadding={horizontalPadding}
+              isLoading={isLoading}
               onQuickSearch={handleQuickSearch}
               palette={palette}
               titleSearchAccessibilityLabel={titleSearchAccessibilityLabel}
@@ -251,17 +308,26 @@ function BookDetailContent({
             />
           )}
 
-      <View style={[styles.body, { paddingHorizontal: horizontalPadding }]}>
+      {isLoading ? (
+        <BookDetailBodyLoading palette={palette} />
+      ) : (
+        <>
+      <View
+        style={[
+          styles.body,
+          { backgroundColor: palette.surface, paddingHorizontal: horizontalPadding },
+        ]}
+      >
         <View style={styles.chips}>
-          <MetaChip icon={IconHeart} palette={palette} value={formatCount(book.favoriteCount)} />
-          <MetaChip icon={IconEye} palette={palette} value={formatCount(book.viewCount)} />
-          <MetaChip icon={IconBooks} palette={palette} value={`${book.chapters.length} chapters`} />
+          <MetaChip icon={IconHeart} palette={palette} value={formatCompactNumber(book.favoriteCount, locale)} />
+          <MetaChip icon={IconEye} palette={palette} value={formatCompactNumber(book.viewCount, locale)} />
+          <MetaChip icon={IconBooks} palette={palette} value={t('detail.chapterCount', { count: book.chapters.length })} />
         </View>
 
         <View style={styles.actions}>
           {book.type === 'Comic' ? null : (
           <IconButton
-            accessibilityLabel={isInShelf ? 'Remove from shelf' : 'Add to shelf'}
+            accessibilityLabel={isInShelf ? t('detail.removeFromShelf') : t('detail.addToShelf')}
             containerColor={isInShelf ? palette.primaryContainer : palette.surfaceContainerHighest}
             disabled={isShelfLoading}
             icon={() =>
@@ -279,7 +345,9 @@ function BookDetailContent({
           )}
 
           <Button
-            accessibilityLabel={resumeChapter ? `Continue reading ${resumeChapter.title}` : 'Start reading'}
+            accessibilityLabel={resumeChapter
+              ? t('detail.continueReading', { title: resumeChapter.title })
+              : t('detail.startReading')}
             buttonColor={palette.primary}
             contentStyle={styles.readButtonContent}
             disabled={book.chapters.length === 0}
@@ -291,20 +359,22 @@ function BookDetailContent({
             textColor={palette.onPrimary}
           >
             {cleanResumeTitle
-              ? `Continue · ${shortenChapterTitle(cleanResumeTitle)}`
-              : 'Start reading'}
+              ? t('detail.continueReadingButton', { title: shortenChapterTitle(cleanResumeTitle) })
+              : t('detail.startReading')}
           </Button>
         </View>
 
         {shelfError ? (
-          <Text style={[styles.actionError, { color: palette.error }]}>{shelfError}</Text>
+          <Text style={[styles.actionError, { color: palette.error }]}>
+            {shelfError.kind === 'raw' ? shelfError.text : t(shelfError.key)}
+          </Text>
         ) : null}
 
         {book.introduction.trim() ? (
           <View style={styles.introductionSection}>
-            <SectionTitle palette={palette}>Introduction</SectionTitle>
+            <SectionTitle palette={palette}>{t('detail.introduction')}</SectionTitle>
             <TouchableRipple
-              accessibilityLabel="Open full introduction"
+              accessibilityLabel={t('detail.openIntroduction')}
               accessibilityRole="button"
               borderless
               onPress={() =>
@@ -344,12 +414,17 @@ function BookDetailContent({
           <IconProgressBolt color={palette.onSurfaceVariant} size={18} strokeWidth={2} />
           <Text numberOfLines={1} style={[styles.updateText, { color: palette.onSurfaceVariant }]}>
             {latestChapter
-              ? `Latest: ${formatRelativeTime(book.lastUpdatedAt)} - ${latestChapter}`
-              : `Latest: ${formatRelativeTime(book.lastUpdatedAt)}`}
+              ? t('detail.latestWithChapter', {
+                  chapter: latestChapter,
+                  time: formatRelativeTime(book.lastUpdatedAt, locale) || t('detail.unknownTime'),
+                })
+              : t('detail.latest', {
+                  time: formatRelativeTime(book.lastUpdatedAt, locale) || t('detail.unknownTime'),
+                })}
           </Text>
         </Surface>
 
-        <SectionTitle palette={palette}>Chapters</SectionTitle>
+        <SectionTitle palette={palette}>{t('detail.chapters')}</SectionTitle>
       </View>
 
       <View style={[styles.chapterList, { paddingHorizontal: horizontalPadding - 12 }]}>
@@ -358,7 +433,7 @@ function BookDetailContent({
           const isCurrent = sortNum === currentSortNum;
           return (
             <TouchableRipple
-              accessibilityLabel={`Read chapter ${sortNum}, ${chapter.title}`}
+              accessibilityLabel={t('detail.readChapter', { number: sortNum, title: chapter.title })}
               accessibilityRole="button"
               key={chapter.id}
               onPress={() => openReader(book.id, book.type ?? bookType ?? 'Novel', sortNum)}
@@ -391,7 +466,9 @@ function BookDetailContent({
                     elevation={0}
                     style={[styles.currentBadge, { backgroundColor: palette.primaryContainer }]}
                   >
-                    <Text style={[styles.currentBadgeLabel, { color: palette.onPrimaryContainer }]}>Current</Text>
+                    <Text style={[styles.currentBadgeLabel, { color: palette.onPrimaryContainer }]}>
+                      {t('detail.current')}
+                    </Text>
                   </Surface>
                 ) : null}
               </View>
@@ -399,6 +476,8 @@ function BookDetailContent({
           );
         })}
       </View>
+        </>
+      )}
           <View style={{ height: 40 + bottomInset }} />
         </Animated.ScrollView>
       </ScrollViewMarker>
@@ -408,6 +487,7 @@ function BookDetailContent({
           coverPlaceholder={coverPlaceholder}
           coverUrl={coverUrl}
           horizontalPadding={horizontalPadding}
+          isLoading={isLoading}
           onQuickSearch={handleQuickSearch}
           palette={palette}
           titleSearchAccessibilityLabel={titleSearchAccessibilityLabel}
@@ -424,6 +504,7 @@ function CollapsibleBookAppBar({
   coverPlaceholder,
   coverUrl,
   horizontalPadding,
+  isLoading,
   onQuickSearch,
   palette,
   scrollOffset,
@@ -434,6 +515,7 @@ function CollapsibleBookAppBar({
   coverPlaceholder: string | null;
   coverUrl: string | null;
   horizontalPadding: number;
+  isLoading: boolean;
   onQuickSearch: (target: BookQuickSearchTarget) => void;
   palette: BookDetailPalette;
   scrollOffset: SharedValue<number>;
@@ -496,6 +578,7 @@ function CollapsibleBookAppBar({
           coverUrl={coverUrl}
           height={maxHeight}
           horizontalPadding={horizontalPadding}
+          isLoading={isLoading}
           onQuickSearch={onQuickSearch}
           palette={palette}
           titleSearchAccessibilityLabel={titleSearchAccessibilityLabel}
@@ -510,6 +593,7 @@ function InlineBookHero({
   coverPlaceholder,
   coverUrl,
   horizontalPadding,
+  isLoading,
   onQuickSearch,
   palette,
   scrollOffset,
@@ -520,6 +604,7 @@ function InlineBookHero({
   coverPlaceholder: string | null;
   coverUrl: string | null;
   horizontalPadding: number;
+  isLoading: boolean;
   onQuickSearch: (target: BookQuickSearchTarget) => void;
   palette: BookDetailPalette;
   scrollOffset: SharedValue<number>;
@@ -559,13 +644,91 @@ function InlineBookHero({
           coverUrl={coverUrl}
           height={height}
           horizontalPadding={horizontalPadding}
+          isLoading={isLoading}
           onQuickSearch={onQuickSearch}
           palette={palette}
+          showBackdrop={false}
           titleSearchAccessibilityLabel={titleSearchAccessibilityLabel}
         />
       </Animated.View>
     </View>
   );
+}
+
+function CollapsingBookHeroBackdrop({
+  maxHeight,
+  minHeight,
+  palette,
+  scrollOffset,
+}: {
+  maxHeight: number;
+  minHeight: number;
+  palette: BookDetailPalette;
+  scrollOffset: SharedValue<number>;
+}) {
+  const backdropStyle = useAnimatedStyle(() => ({
+    height: interpolate(
+      scrollOffset.value,
+      [0, BOOK_HERO_COLLAPSE_DISTANCE],
+      [maxHeight, minHeight],
+      'clamp',
+    ),
+  }));
+  const colorStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(
+      scrollOffset.value,
+      [
+        0,
+        BOOK_HERO_COLLAPSE_DISTANCE - BOOK_HERO_TOOLBAR_HEIGHT,
+        BOOK_HERO_COLLAPSE_DISTANCE,
+      ],
+      [1, 1, 0],
+      'clamp',
+    ),
+  }));
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        styles.heroBackdrop,
+        { backgroundColor: palette.surface },
+        backdropStyle,
+      ]}
+    >
+      <Animated.View style={[StyleSheet.absoluteFill, colorStyle]}>
+        <BookHeroBackdropPaint palette={palette} />
+      </Animated.View>
+    </Animated.View>
+  );
+}
+
+function BookHeroBackdrop({
+  height,
+  palette,
+}: {
+  height: number;
+  palette: BookDetailPalette;
+}) {
+  return (
+    <View
+      pointerEvents="none"
+      style={[
+        styles.heroBackdrop,
+        { backgroundColor: palette.surface, height },
+      ]}
+    >
+      <BookHeroBackdropPaint palette={palette} />
+    </View>
+  );
+}
+
+function BookHeroBackdropPaint({ palette }: { palette: BookDetailPalette }) {
+  return palette.gradientColors ? (
+    <>
+      <View style={[StyleSheet.absoluteFill, heroGradientStyle(palette.gradientColors)]} />
+      <View style={[StyleSheet.absoluteFill, heroTransitionStyle(palette.headerTransitionColors)]} />
+    </>
+  ) : null;
 }
 
 function BookHeroContent({
@@ -575,8 +738,10 @@ function BookHeroContent({
   coverUrl,
   height,
   horizontalPadding,
+  isLoading,
   onQuickSearch,
   palette,
+  showBackdrop = true,
   titleSearchAccessibilityLabel,
 }: {
   author: string;
@@ -585,10 +750,13 @@ function BookHeroContent({
   coverUrl: string | null;
   height: number;
   horizontalPadding: number;
+  isLoading: boolean;
   onQuickSearch: (target: BookQuickSearchTarget) => void;
   palette: BookDetailPalette;
+  showBackdrop?: boolean;
   titleSearchAccessibilityLabel: string;
 }) {
+  const { t } = useTranslation('book');
   const title = book.title.trim();
 
   return (
@@ -597,21 +765,10 @@ function BookHeroContent({
       pointerEvents="box-none"
       style={[
         styles.hero,
-        { backgroundColor: palette.surface, height },
+        { backgroundColor: showBackdrop ? palette.surface : 'transparent', height },
       ]}
     >
-      {palette.gradientColors ? (
-        <>
-          <View
-            pointerEvents="none"
-            style={[StyleSheet.absoluteFill, heroGradientStyle(palette.gradientColors)]}
-          />
-          <View
-            pointerEvents="none"
-            style={[StyleSheet.absoluteFill, heroTransitionStyle(palette.headerTransitionColors)]}
-          />
-        </>
-      ) : null}
+      {showBackdrop ? <BookHeroBackdrop height={height} palette={palette} /> : null}
       <View
         pointerEvents="box-none"
         style={[styles.heroContent, { left: horizontalPadding, right: horizontalPadding }]}
@@ -620,7 +777,7 @@ function BookHeroContent({
           <View style={styles.coverFrame}>
             {coverUrl ? (
               <BookCoverImage
-                accessibilityLabel={`${book.title} cover`}
+                accessibilityLabel={t('cover.accessibility', { title: book.title })}
                 blurHash={coverPlaceholder}
                 source={coverUrl}
               />
@@ -632,7 +789,41 @@ function BookHeroContent({
           </View>
         </View>
         <View pointerEvents="box-none" style={styles.heroText}>
-          {title ? (
+          {isLoading ? (
+            <SkeletonGroup
+              animation={{
+                shimmer: {
+                  duration: 1_400,
+                  highlightColor: shimmerHighlightColor(palette.surfaceContainerHighest),
+                },
+              }}
+              isLoading
+              variant="shimmer"
+            >
+              <View style={styles.loadingTextGroup}>
+                {title ? (
+                  <Text numberOfLines={4} style={[styles.bookTitle, { color: palette.onSurface }]}>
+                    {book.title}
+                  </Text>
+                ) : (
+                  <SkeletonGroup.Item
+                    style={[
+                      styles.loadingBlock,
+                      styles.loadingTitle,
+                      { backgroundColor: palette.surfaceContainerHighest },
+                    ]}
+                  />
+                )}
+                <SkeletonGroup.Item
+                  style={[
+                    styles.loadingBlock,
+                    styles.loadingAuthor,
+                    { backgroundColor: palette.surfaceContainerHighest },
+                  ]}
+                />
+              </View>
+            </SkeletonGroup>
+          ) : title ? (
             <Pressable
               accessibilityLabel={titleSearchAccessibilityLabel}
               accessibilityRole="button"
@@ -658,7 +849,7 @@ function BookHeroContent({
           )}
           {author ? (
             <Pressable
-              accessibilityLabel={`Search for author ${author}`}
+              accessibilityLabel={t('detail.searchAuthor', { author })}
               accessibilityRole="button"
               onPress={() => onQuickSearch('author')}
               style={({ pressed }) => [styles.quickSearchTarget, pressed && styles.quickSearchPressed]}
@@ -697,92 +888,30 @@ function SectionTitle({ children, palette }: { children: ReactNode; palette: Boo
   return <Text style={[styles.sectionTitle, { color: palette.onSurfaceVariant }]}>{children}</Text>;
 }
 
-function BookDetailLoading({
-  coverPlaceholder,
-  coverUrl,
-  initialTitle,
-  palette,
-}: {
-  coverPlaceholder: string | null;
-  coverUrl: string | null;
-  initialTitle: string | null;
-  palette: BookDetailPalette;
-}) {
-  const { top: topInset } = useSafeAreaInsets();
+function BookDetailBodyLoading({ palette }: { palette: BookDetailPalette }) {
   const block = { backgroundColor: palette.surfaceContainerHighest };
   return (
-    <ScrollView
-      contentInsetAdjustmentBehavior="automatic"
-      contentContainerStyle={{ backgroundColor: palette.surface }}
-      scrollEnabled={false}
+    <SkeletonGroup
+      animation={{
+        shimmer: {
+          duration: 1_400,
+          highlightColor: shimmerHighlightColor(palette.surfaceContainerHighest),
+        },
+      }}
+      isLoading
+      variant="shimmer"
     >
-      <SkeletonGroup
-        animation={{
-          shimmer: {
-            duration: 1_400,
-            highlightColor: shimmerHighlightColor(palette.surfaceContainerHighest),
-          },
-        }}
-        isLoading
-        variant="shimmer"
-      >
-        <View
-          style={[
-            styles.loadingHero,
-            { height: BOOK_HERO_HEIGHT + topInset },
-          ]}
-        >
-          <View style={[styles.loadingBlock, styles.loadingCover, block]}>
-            {coverUrl ? (
-              <BookCoverImage
-                accessibilityLabel={`${initialTitle ?? 'Book'} cover`}
-                blurHash={coverPlaceholder}
-                source={coverUrl}
-              />
-            ) : null}
-          </View>
-          <View style={styles.loadingTextGroup}>
-            {initialTitle ? (
-              <Text
-                numberOfLines={4}
-                style={[styles.bookTitle, { color: palette.onSurface }]}
-              >
-                {initialTitle}
-              </Text>
-            ) : (
-              <SkeletonGroup.Item
-                style={[styles.loadingBlock, styles.loadingTitle, block]}
-              />
-            )}
-            <SkeletonGroup.Item
-              style={[styles.loadingBlock, styles.loadingAuthor, block]}
-            />
-          </View>
+      <View style={styles.loadingBody}>
+        <View style={styles.loadingChipRow}>
+          <SkeletonGroup.Item style={[styles.loadingBlock, styles.loadingChip, block]} />
+          <SkeletonGroup.Item style={[styles.loadingBlock, styles.loadingChip, block]} />
+          <SkeletonGroup.Item style={[styles.loadingBlock, styles.loadingChipWide, block]} />
         </View>
-        <View style={styles.loadingBody}>
-          <View style={styles.loadingChipRow}>
-            <SkeletonGroup.Item
-              style={[styles.loadingBlock, styles.loadingChip, block]}
-            />
-            <SkeletonGroup.Item
-              style={[styles.loadingBlock, styles.loadingChip, block]}
-            />
-            <SkeletonGroup.Item
-              style={[styles.loadingBlock, styles.loadingChipWide, block]}
-            />
-          </View>
-          <SkeletonGroup.Item
-            style={[styles.loadingBlock, styles.loadingAction, block]}
-          />
-          <SkeletonGroup.Item
-            style={[styles.loadingBlock, styles.loadingParagraph, block]}
-          />
-          <SkeletonGroup.Item
-            style={[styles.loadingBlock, styles.loadingUpdate, block]}
-          />
-        </View>
-      </SkeletonGroup>
-    </ScrollView>
+        <SkeletonGroup.Item style={[styles.loadingBlock, styles.loadingAction, block]} />
+        <SkeletonGroup.Item style={[styles.loadingBlock, styles.loadingParagraph, block]} />
+        <SkeletonGroup.Item style={[styles.loadingBlock, styles.loadingUpdate, block]} />
+      </View>
+    </SkeletonGroup>
   );
 }
 
@@ -805,11 +934,13 @@ function BookDetailError({
   palette,
   requiresAuth,
 }: {
-  error: string;
+  error: BookUserMessage;
   onRetry: () => void;
   palette: BookDetailPalette;
   requiresAuth: boolean;
 }) {
+  const { t } = useTranslation('book');
+  const { t: tCommon } = useTranslation('common');
   return (
     <ScrollView
       contentInsetAdjustmentBehavior="automatic"
@@ -817,14 +948,18 @@ function BookDetailError({
       style={{ backgroundColor: palette.surface }}
     >
       <IconBooks color={palette.onSurfaceVariant} size={42} strokeWidth={1.7} />
-      <Text style={[styles.errorTitle, { color: palette.onSurface }]}>Unable to load this book</Text>
-      <Text style={[styles.errorText, { color: palette.onSurfaceVariant }]}>{error}</Text>
+      <Text style={[styles.errorTitle, { color: palette.onSurface }]}>
+        {t('errors.detail.title')}
+      </Text>
+      <Text style={[styles.errorText, { color: palette.onSurfaceVariant }]}>
+        {error.kind === 'raw' ? error.text : t(error.key)}
+      </Text>
       <Button icon="refresh" mode="text" onPress={onRetry} textColor={palette.primary}>
-        Try again
+        {tCommon('actions.retry')}
       </Button>
       {requiresAuth ? (
         <Button mode="text" onPress={() => router.push('/sign-in')} textColor={palette.primary}>
-          Sign in
+          {t('actions.signIn')}
         </Button>
       ) : null}
     </ScrollView>
@@ -846,30 +981,6 @@ function openReader(bookId: number, type: 'Novel' | 'Comic', sortNum: number) {
 
 function shortenChapterTitle(title: string): string {
   return title.length > 15 ? `${title.slice(0, 15)}...` : title;
-}
-
-function formatCount(value: number): string {
-  return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value);
-}
-
-function formatRelativeTime(value: string): string {
-  const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) return 'unknown';
-
-  const elapsed = Math.max(0, Date.now() - timestamp);
-  const minutes = Math.floor(elapsed / 60_000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-
-  const days = Math.floor(hours / 24);
-  if (days < 26) return `${days}d ago`;
-  if (days < 46) return '1mo ago';
-  if (days < 320) return `${Math.round(days / 30.4)}mo ago`;
-  if (days < 548) return '1y ago';
-  return `${Math.round(days / 365.25)}y ago`;
 }
 
 function heroGradientStyle(colors: readonly [string, string, string]): ViewStyle {
@@ -921,6 +1032,7 @@ const styles = StyleSheet.create({
   errorTitle: { fontSize: 18, fontWeight: '700', letterSpacing: 0, lineHeight: 24 },
   flexibleAppBarBackground: { left: 0, position: 'absolute', right: 0, top: 0 },
   hero: { overflow: 'hidden' },
+  heroBackdrop: { left: 0, overflow: 'hidden', position: 'absolute', right: 0, top: 0 },
   heroContent: { alignItems: 'flex-end', bottom: 16, flexDirection: 'row', gap: 16, position: 'absolute' },
   heroText: { flex: 1, gap: 4, paddingBottom: 1 },
   inlineHeroClip: { overflow: 'hidden' },

@@ -1,4 +1,5 @@
 import { Stack } from 'expo-router';
+import { useTranslation } from 'react-i18next';
 
 import type { ReaderNavigationProps } from '@/components/reader-navigation.types';
 
@@ -10,23 +11,31 @@ export function ReaderNavigation({
   onOpenSettings,
   title,
 }: ReaderNavigationProps) {
+  const { t } = useTranslation('reader');
   return (
     <>
       <Stack.Screen
         options={{
           headerTintColor: foregroundColor,
+          headerTransparent: true,
+          scrollEdgeEffects: {
+            bottom: 'hidden',
+            left: 'hidden',
+            right: 'hidden',
+            top: 'soft',
+          },
           title,
         }}
       />
       <Stack.Toolbar placement="right">
         <Stack.Toolbar.Button
-          accessibilityLabel="Chapter list"
+          accessibilityLabel={t('accessibility.chapterList')}
           icon="list.bullet"
           onPress={onOpenChapters}
           tintColor={foregroundColor}
         />
         <Stack.Toolbar.Menu
-          accessibilityLabel="Reading mode"
+          accessibilityLabel={t('accessibility.readingMode')}
           icon="ellipsis.circle"
           tintColor={foregroundColor}
         >
@@ -35,18 +44,18 @@ export function ReaderNavigation({
             isOn={mode === 'scroll'}
             onPress={() => onModeChange('scroll')}
           >
-            Scroll
+            {t('modes.scroll')}
           </Stack.Toolbar.MenuAction>
           <Stack.Toolbar.MenuAction
             icon="rectangle.split.1x2"
             isOn={mode === 'paged'}
             onPress={() => onModeChange('paged')}
           >
-            Paged
+            {t('modes.paged')}
           </Stack.Toolbar.MenuAction>
         </Stack.Toolbar.Menu>
         <Stack.Toolbar.Button
-          accessibilityLabel="Reader settings"
+          accessibilityLabel={t('accessibility.readerSettings')}
           icon="gearshape"
           onPress={onOpenSettings}
           tintColor={foregroundColor}

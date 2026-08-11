@@ -3,6 +3,8 @@ import { useEffect, useSyncExternalStore } from 'react';
 import type { RankPeriod } from '@novella/client-core';
 
 import { createExpoStorage } from '@/adapters/expo-runtime';
+import type { AppLanguage } from '@/localization/locale';
+import { decodeAppLanguage } from '@/localization/locale';
 import {
   decodeSeriesSearchMode,
   type SeriesSearchMode,
@@ -39,12 +41,6 @@ export function toggleCleanChapterTitleScope(
   return scopes.filter((item) => item !== scope);
 }
 
-export const RANK_PERIOD_OPTIONS: readonly { label: string; value: RankPeriod }[] = [
-  { label: 'Daily', value: 'daily' },
-  { label: 'Weekly', value: 'weekly' },
-  { label: 'Monthly', value: 'monthly' },
-];
-
 export function isRankPeriod(value: unknown): value is RankPeriod {
   return value === 'daily' || value === 'weekly' || value === 'monthly';
 }
@@ -61,13 +57,14 @@ export interface AppSettings {
   fontSize: number;
   homeRankType: RankPeriod;
   ignoreAI: boolean;
+  language: AppLanguage;
   ignoreJapanese: boolean;
   ignoreLevel6: boolean;
   oledBlack: boolean;
   readerFirstLineIndent: boolean;
   readerImagePreviewOpenOnLongPress: boolean;
   readerLineHeight: number;
-  readerPagedNoAnimation: boolean;
+  comicPagedDirection: 'ltr' | 'rtl';
   readerPreloadWindow: number;
   readerSidePadding: number;
   readerViewMode: ReaderViewMode;
@@ -90,13 +87,14 @@ const DEFAULT_SETTINGS: AppSettings = {
   homeRankType: 'weekly',
   ignoreAI: false,
   ignoreJapanese: false,
+  language: 'system',
   ignoreLevel6: true,
   oledBlack: process.env.EXPO_OS === 'ios',
   readerFirstLineIndent: false,
   readerImagePreviewOpenOnLongPress: false,
   readerLineHeight: 1.6,
-  readerPagedNoAnimation: false,
-  readerPreloadWindow: 1,
+  comicPagedDirection: 'ltr',
+  readerPreloadWindow: 3,
   readerSidePadding: 30,
   readerViewMode: 'paged',
   seedColorValue: DEFAULT_THEME_SEED,
@@ -208,6 +206,7 @@ function decodeSettings(value: unknown): AppSettings {
     ...(typeof candidate.ignoreLevel6 === 'boolean'
       ? { ignoreLevel6: candidate.ignoreLevel6 }
       : {}),
+    language: decodeAppLanguage(candidate.language),
     ...(process.env.EXPO_OS === 'ios'
       ? { oledBlack: true }
       : typeof candidate.oledBlack === 'boolean'
@@ -222,8 +221,8 @@ function decodeSettings(value: unknown): AppSettings {
     ...(typeof candidate.readerLineHeight === 'number'
       ? { readerLineHeight: clamp(candidate.readerLineHeight, 1, 2.5) }
       : {}),
-    ...(typeof candidate.readerPagedNoAnimation === 'boolean'
-      ? { readerPagedNoAnimation: candidate.readerPagedNoAnimation }
+    ...(candidate.comicPagedDirection === 'ltr' || candidate.comicPagedDirection === 'rtl'
+      ? { comicPagedDirection: candidate.comicPagedDirection }
       : {}),
     ...(typeof candidate.readerPreloadWindow === 'number' &&
       Number.isFinite(candidate.readerPreloadWindow)

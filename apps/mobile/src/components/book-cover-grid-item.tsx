@@ -1,4 +1,5 @@
 import { IconCheck, IconGripVertical } from '@tabler/icons-react-native';
+import { useTranslation } from 'react-i18next';
 import {
   Pressable,
   StyleSheet,
@@ -9,7 +10,10 @@ import {
   type GestureResponderEvent,
 } from 'react-native';
 
-import type { BookListItem } from '@novella/api-client';
+import {
+  normalizeCoverUrl,
+  type BookListItem,
+} from '@novella/api-client';
 
 import { BookCoverImage } from '@/components/book-cover-image';
 import { BookTypeBadgeIcon } from '@/components/book-type-badge';
@@ -48,8 +52,10 @@ export function BookCoverGridItem({
   rank,
   tileWidth,
 }: BookCoverGridItemProps) {
+  const { t } = useTranslation('book');
   const styles = useBookCoverGridItemStyles();
   const categoryBadge = resolveBookCategoryBadge(book.category);
+  const coverUrl = normalizeCoverUrl(book.coverUrl);
   const levelBadge = resolveBookLevelBadge({
     interiorLevel: book.interiorLevel,
     level: book.level,
@@ -69,16 +75,17 @@ export function BookCoverGridItem({
       style={[styles.item, { width: tileWidth }]}
     >
       <View
+        pointerEvents="none"
         style={[
           styles.coverFrame,
           { aspectRatio: BOOK_COVER_ASPECT_RATIO, width: tileWidth },
         ]}
       >
         <BookCoverImage
-          accessibilityLabel={`${book.title} cover`}
+          accessibilityLabel={t('cover.accessibility', { title: book.title })}
           {...(animateCachedImage === undefined ? {} : { animateCachedImage })}
           blurHash={book.coverPlaceholder}
-          source={book.coverUrl}
+          source={coverUrl}
         />
 
         {levelBadge ? (
