@@ -14,6 +14,7 @@ const MATERIAL_SHEET_MAX_WIDTH = 640;
 
 export function NativeBottomSheet({
   children,
+  containerColor,
   fitToContents = false,
   onDismiss,
   ...props
@@ -22,12 +23,21 @@ export function NativeBottomSheet({
   const contentWidth = Math.min(width, MATERIAL_SHEET_MAX_WIDTH);
   return (
     <Host pointerEvents="box-none" style={[styles.host, { width }]}>
-      <NativeView {...props} onDismissRequest={onDismiss}>
+      <NativeView
+        {...props}
+        containerColor={containerColor}
+        onDismissRequest={onDismiss}
+      >
+        {/* The Compose BottomSheet owns the base surface. Keeping the hosted
+            Android view transparent avoids unclipped full-height rectangles
+            when partial sheets translate or resize their RN content. */}
         <RNHostView
           matchContents={fitToContents}
           style={fitToContents ? { width: contentWidth } : undefined}
         >
-          <View style={fitToContents ? [styles.fitContent, { width: contentWidth }] : styles.fill}>
+          <View
+            style={fitToContents ? [styles.fitContent, { width: contentWidth }] : styles.fill}
+          >
             {children}
           </View>
         </RNHostView>

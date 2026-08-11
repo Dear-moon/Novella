@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { ApiError, type CommentPage, type PostCommentRequest } from '@novella/api-client';
 
 import { comments } from '@/services/client';
+import { mergeCommunityItems } from '@/services/community-utils';
 import type { CommentTarget } from '@/services/comment-target';
 import { waitForMinimumDisplay } from '@/services/min-skeleton-display';
 
@@ -34,9 +35,14 @@ export function useComments(target: CommentTarget) {
   // Kept up to date so load() (stabilized on [bookId]) can decide whether the
   // skeleton is on screen without being recreated on every state change.
   const stateRef = useRef(state);
+  const loadingMoreRef = useRef(false);
   stateRef.current = state;
 
   const load = useCallback(async (pageNumber = 1, append = false, silent = false) => {
+    if (append) {
+      if (loadingMoreRef.current) return null;
+      loadingMoreRef.current = true;
+    }
     const startedAt = Date.now();
     const showSkeleton = !append && !(silent && stateRef.current.page !== null);
     setState((current) => ({
@@ -62,7 +68,7 @@ export function useComments(target: CommentTarget) {
         isLoadingMore: false,
         page:
           append && current.page
-            ? { ...next, items: [...current.page.items, ...next.items] }
+            ? { ...next, items: mergeCommunityItems(current.page.items, next.items) }
             : next,
       }));
       return next;
@@ -75,6 +81,8 @@ export function useComments(target: CommentTarget) {
         isLoadingMore: false,
       }));
       return null;
+    } finally {
+      if (append) loadingMoreRef.current = false;
     }
   }, [id, localizeError, seriesTitle, type]);
 
@@ -100,6 +108,15 @@ export function useComments(target: CommentTarget) {
   }, [load, localizeError]);
 
   const refresh = useCallback(() => load(1, false, true), [load]);
+  const loadMore = useCallback(() => {
+    const current = stateRef.current;
+    if (
+      !current.page
+      || loadingMoreRef.current
+      || current.page.page >= current.page.totalPages
+    ) return;
+    void load(current.page.page + 1, true);
+  }, [load]);
 
   // Deletes go through their own reconcile flow because the server's
   // DeleteComment hub method is void: it deletes the comment, then answers with
@@ -152,10 +169,7 @@ export function useComments(target: CommentTarget) {
   return {
     ...state,
     deleteComment,
-    loadMore: () => {
-      if (!state.page || state.isLoadingMore || state.page.page >= state.page.totalPages) return;
-      void load(state.page.page + 1, true);
-    },
+    loadMore,
     postComment: (content: string) =>
       mutate(() => comments.post({
         type,

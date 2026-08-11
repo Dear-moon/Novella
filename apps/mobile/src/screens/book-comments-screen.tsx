@@ -1,5 +1,5 @@
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   FlatList,
@@ -12,6 +12,7 @@ import {
 import { showAlert } from '@/components/native-alert-dialog';
 import { IconMessage, IconRefresh } from '@tabler/icons-react-native';
 import { PaperProvider } from 'react-native-paper';
+import type { CommentItem } from '@novella/api-client';
 
 import { BookCommentsNavigation } from '@/components/book-comments-navigation';
 import type { CommentThreadPalette } from '@/components/comment-thread';
@@ -34,7 +35,7 @@ export function BookCommentsScreen({ bookId }: BookCommentsScreenProps) {
   const { t: tCommon } = useTranslation('common');
   const detailTheme = useBookDetailRouteTheme(bookId, null, null, true);
   const { palette } = detailTheme;
-  const commentPalette = toCommentThreadPalette(palette);
+  const commentPalette = useMemo(() => toCommentThreadPalette(palette), [palette]);
   const {
     deleteComment,
     error,
@@ -78,12 +79,24 @@ export function BookCommentsScreen({ bookId }: BookCommentsScreenProps) {
     });
   }, [bookId]);
 
-  function confirmDelete(commentId: number) {
+  const confirmDelete = useCallback((commentId: number) => {
     showAlert(t('comments.deleteTitle'), t('comments.deleteMessage'), [
       { text: tCommon('actions.cancel'), style: 'cancel' },
       { text: tCommon('actions.delete'), style: 'destructive', onPress: () => void deleteComment(commentId) },
     ]);
-  }
+  }, [deleteComment, t, tCommon]);
+
+  const renderComment = useCallback(
+    ({ item }: { item: CommentItem }) => (
+      <CommentThreadItem
+        item={item}
+        onDelete={confirmDelete}
+        onReply={openComposer}
+        palette={commentPalette}
+      />
+    ),
+    [commentPalette, confirmDelete, openComposer],
+  );
 
   return (
     <PaperProvider theme={detailTheme.paperTheme}>
@@ -161,14 +174,7 @@ export function BookCommentsScreen({ bookId }: BookCommentsScreenProps) {
             }
             onEndReached={loadMore}
             onEndReachedThreshold={0.35}
-            renderItem={({ item }) => (
-              <CommentThreadItem
-                item={item}
-                onDelete={confirmDelete}
-                onReply={openComposer}
-                palette={commentPalette}
-              />
-            )}
+            renderItem={renderComment}
             showsVerticalScrollIndicator={false}
           />
         </View>
