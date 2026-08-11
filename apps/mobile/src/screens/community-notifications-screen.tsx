@@ -5,7 +5,7 @@ import {
   IconSpeakerphone,
 } from '@tabler/icons-react-native';
 import { router, Stack } from 'expo-router';
-import { Button, Card, Chip, Spinner } from 'heroui-native';
+import { Button, Chip, Skeleton, Spinner } from 'heroui-native';
 import { memo, useCallback } from 'react';
 import {
   FlatList,
@@ -24,7 +24,6 @@ import {
   CommunityEmptyState,
   CommunityErrorState,
   CommunityPaperProvider,
-  CommunityThreadSkeleton,
 } from '@/components/community/community-ui';
 import { showAlert } from '@/components/native-alert-dialog';
 import { NativeScreenScaffold } from '@/components/native-screen-scaffold';
@@ -110,9 +109,9 @@ export function CommunityNotificationsScreen() {
           ListEmptyComponent={
             state.loading ? (
               <View style={styles.skeletons}>
-                <CommunityThreadSkeleton />
-                <CommunityThreadSkeleton />
-                <CommunityThreadSkeleton />
+                <NotificationSkeleton />
+                <NotificationSkeleton />
+                <NotificationSkeleton />
               </View>
             ) : state.error ? (
               <CommunityErrorState description={state.error} onRetry={retry} title={t('notifications.loadErrorTitle')} />
@@ -160,6 +159,66 @@ export function CommunityNotificationsScreen() {
   );
 }
 
+const NotificationSkeleton = memo(function NotificationSkeleton() {
+  const styles = useCommunityNotificationsStyles();
+  return (
+    <View
+      accessibilityElementsHidden
+      importantForAccessibility="no-hide-descendants"
+      style={[styles.card, styles.skeletonCard]}
+    >
+      <View style={styles.cardBody}>
+        <View style={styles.topRow}>
+          <Skeleton
+            animation={{ entering: false, exiting: false }}
+            style={styles.skeletonAvatar}
+            variant="shimmer"
+          />
+          <View style={styles.skeletonCopy}>
+            <Skeleton
+              animation={{ entering: false, exiting: false }}
+              style={styles.skeletonActor}
+              variant="shimmer"
+            />
+            <Skeleton
+              animation={{ entering: false, exiting: false }}
+              style={styles.skeletonAction}
+              variant="shimmer"
+            />
+          </View>
+          <Skeleton
+            animation={{ entering: false, exiting: false }}
+            style={styles.skeletonIcon}
+            variant="shimmer"
+          />
+        </View>
+        <Skeleton
+          animation={{ entering: false, exiting: false }}
+          style={styles.skeletonTitle}
+          variant="shimmer"
+        />
+        <Skeleton
+          animation={{ entering: false, exiting: false }}
+          style={styles.skeletonPreview}
+          variant="shimmer"
+        />
+        <View style={styles.metaRow}>
+          <Skeleton
+            animation={{ entering: false, exiting: false }}
+            style={styles.skeletonChip}
+            variant="shimmer"
+          />
+          <Skeleton
+            animation={{ entering: false, exiting: false }}
+            style={styles.skeletonTime}
+            variant="shimmer"
+          />
+        </View>
+      </View>
+    </View>
+  );
+});
+
 const NotificationCard = memo(function NotificationCard({
   item,
   onPress,
@@ -189,11 +248,13 @@ const NotificationCard = memo(function NotificationCard({
       onPress={() => onPress(item)}
       style={({ pressed }) => pressed && styles.pressed}
     >
-      <Card
-        style={[styles.card, !item.isRead && styles.unreadCard]}
-        variant={item.isRead ? 'secondary' : 'tertiary'}
+      <View
+        style={[
+          styles.card,
+          item.isRead ? styles.readCard : styles.unreadCard,
+        ]}
       >
-        <Card.Body style={styles.cardBody}>
+        <View style={styles.cardBody}>
           <View style={styles.topRow}>
             <ProfileAvatar
               avatarUrl={item.actor?.avatar ?? ''}
@@ -222,8 +283,8 @@ const NotificationCard = memo(function NotificationCard({
             <Text style={styles.time}>{formatCommunityTime(item.createdAt, locale)}</Text>
             <IconChevronRight color={colors.secondaryLabel as string} size={17} />
           </View>
-        </Card.Body>
-      </Card>
+        </View>
+      </View>
     </Pressable>
   );
 });
@@ -272,8 +333,9 @@ const useCommunityNotificationsStyles = createThemedStyles((colors) => ({
   action: { color: colors.secondaryLabel, fontSize: 13, marginTop: 2 },
   actor: { color: colors.label, flexShrink: 1, fontSize: 14, fontWeight: '700' },
   actorRow: { alignItems: 'center', flexDirection: 'row', gap: 7 },
-  card: { borderRadius: 18 },
+  card: { borderCurve: 'continuous', borderRadius: 18, overflow: 'hidden' },
   cardBody: { gap: 10, padding: 15 },
+  readCard: { backgroundColor: colors.card },
   content: { padding: 16, paddingBottom: 40 },
   copy: { flex: 1 },
   loadingMore: { alignItems: 'center', padding: 16 },
@@ -282,10 +344,24 @@ const useCommunityNotificationsStyles = createThemedStyles((colors) => ({
   preview: { color: colors.secondaryLabel, fontSize: 14, lineHeight: 20 },
   root: { backgroundColor: colors.background, flex: 1 },
   separator: { height: 11 },
+  skeletonAction: { borderRadius: 5, height: 11, width: '58%' },
+  skeletonActor: { borderRadius: 5, height: 13, width: '42%' },
+  skeletonAvatar: { borderRadius: 19, height: 38, width: 38 },
+  skeletonCard: { backgroundColor: colors.card },
+  skeletonChip: { borderRadius: 10, height: 20, width: 64 },
+  skeletonCopy: { flex: 1, gap: 7 },
+  skeletonIcon: { borderRadius: 10, height: 20, width: 20 },
+  skeletonPreview: { borderRadius: 6, height: 36, width: '88%' },
+  skeletonTime: { borderRadius: 5, height: 11, width: 76 },
+  skeletonTitle: { borderRadius: 6, height: 15, width: '72%' },
   skeletons: { gap: 11 },
   targetTitle: { color: colors.label, fontSize: 15, fontWeight: '600' },
   time: { color: colors.secondaryLabel, flex: 1, fontSize: 12 },
   topRow: { alignItems: 'center', flexDirection: 'row', gap: 10 },
-  unreadCard: { borderColor: colors.accent, borderWidth: StyleSheet.hairlineWidth },
+  unreadCard: {
+    backgroundColor: colors.surfaceContainerHighest,
+    borderColor: colors.accent,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
   unreadDot: { backgroundColor: colors.accent, borderRadius: 4, height: 7, width: 7 },
 }));

@@ -83,7 +83,9 @@ export function useCommunityNotifications() {
   const loadRef = useRef(load);
   loadRef.current = load;
   useFocusEffect(useCallback(() => {
-    void loadRef.current({ refreshing: hasLoadedRef.current });
+    // Returning from a notification target reconciles silently. Only an
+    // explicit pull gesture should drive RefreshControl's visible spinner.
+    void loadRef.current();
     return () => controllerRef.current?.abort();
   }, []));
 
@@ -116,7 +118,7 @@ export function useCommunityNotifications() {
     if (unreadIds.length === 0 || state.marking) return;
     setState((current) => ({
       ...current,
-      items: current.items.map((item) => ({ ...item, isRead: true })),
+      items: current.items.map((item) => item.isRead ? item : { ...item, isRead: true }),
       marking: true,
     }));
     try {
