@@ -28,6 +28,30 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       },
     ],
     'expo-router',
+    // Register before expo-splash-screen so the native mods can replace its
+    // per-appearance bitmaps with one mask driven by adaptive tint colors.
+    './plugins/with-adaptive-splash-logo',
+    [
+      'expo-splash-screen',
+      {
+        android: {
+          // Match the adaptive launcher icon exactly; the native plugin applies
+          // the light/dark tint without replacing its foreground geometry.
+          image: './assets/android-icon-foreground.png',
+          imageWidth: 200,
+        },
+        backgroundColor: '#FFFFFF',
+        dark: {
+          backgroundColor: '#000000',
+        },
+        image: './assets/splash-logo-on-light.png',
+        imageWidth: 200,
+        resizeMode: 'contain',
+      },
+    ],
+    // Expo config mods unwind in reverse order: register this first so it can
+    // update the build phase after expo-dev-client creates it.
+    './plugins/with-expo-dev-launcher-build-phase',
     'expo-dev-client',
     [
       'expo-build-properties',
