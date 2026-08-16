@@ -4,6 +4,7 @@ import type { ReaderChapterBarDirection } from '@/services/reader-chrome-layout'
 
 export interface ReaderNavigationProps {
   backgroundColor: string;
+  forceLightAppearance?: boolean;
   foregroundColor: string;
   mode: ReaderMode;
   onModeChange: (mode: ReaderMode) => void;

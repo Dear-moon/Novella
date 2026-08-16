@@ -30,9 +30,11 @@ import {
   type ComicReadingDirection,
 } from '@/services/comic-reader-layout';
 import { reader } from '@/services/client';
+import { ComicReaderAppearanceScope } from '@/components/comic-reader-appearance-scope';
 import { ReaderChapterNavigation } from '@/components/reader-chapter-navigation';
 import { ReaderErrorState, ReaderPreparationState } from '@/components/reader-chrome';
 import { ReaderNavigation } from '@/components/reader-navigation';
+import { NativeScrollEdgeMarker } from '../../modules/novella-ui/src/native-scroll-edge-marker';
 import { subscribeReaderChapterSelection } from '@/services/reader-chapter-selection';
 import {
   getCachedReaderPosition,
@@ -87,7 +89,15 @@ export interface ComicReaderScreenProps {
   openPosition?: ReaderOpenPosition;
 }
 
-export function ComicReaderScreen({ bookId, sortNum, openPosition = 'saved' }: ComicReaderScreenProps) {
+export function ComicReaderScreen(props: ComicReaderScreenProps) {
+  return (
+    <ComicReaderAppearanceScope>
+      <ComicReaderScreenContent {...props} />
+    </ComicReaderAppearanceScope>
+  );
+}
+
+function ComicReaderScreenContent({ bookId, sortNum, openPosition = 'saved' }: ComicReaderScreenProps) {
   const { t } = useTranslation('reader');
   const { colors } = useAppTheme();
   const { height: windowHeight, width } = useWindowDimensions();
@@ -525,14 +535,15 @@ export function ComicReaderScreen({ bookId, sortNum, openPosition = 'saved' }: C
 
   return (
     <>
-      <View style={styles.root}>
+      <View style={[styles.root, { backgroundColor: colors.background }]}>
       {error ? (
         <ReaderErrorState
           message={error.kind === 'raw' ? error.text : t(error.key)}
           onRetry={loadChapter}
         />
       ) : loading || !activeChapter ? <ReaderPreparationState label={t('states.loadingComic')} /> : (
-        mode === 'paged' ? (
+        <>
+        {mode === 'paged' ? (
         <FlatList
           ref={pagedListRef}
           contentInsetAdjustmentBehavior="never"
@@ -614,11 +625,14 @@ export function ComicReaderScreen({ bookId, sortNum, openPosition = 'saved' }: C
           viewabilityConfig={COMIC_SCROLL_VIEWABILITY_CONFIG}
           windowSize={5}
         />
-      )
+      )}
+        <NativeScrollEdgeMarker hidesAllEdgeEffects />
+        </>
       )}
       </View>
       <ReaderNavigation
         backgroundColor={colors.background as string}
+        {...(process.env.EXPO_OS === 'ios' ? { forceLightAppearance: true } : {})}
         foregroundColor={colors.label as string}
         mode={mode}
         onModeChange={changeMode}

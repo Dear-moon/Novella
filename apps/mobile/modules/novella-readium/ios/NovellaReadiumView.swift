@@ -22,6 +22,8 @@ final class NovellaReadiumView: ExpoView, EPUBNavigatorDelegate, WKScriptMessage
   private var navigator: EPUBNavigatorViewController?
   private var directionalNavigationAdapter: DirectionalNavigationAdapter?
   private var scrollNavigationObserver: InputObservableToken?
+  private var scrollEdgeEffectObservations: [NSKeyValueObservation] = []
+  private var observedScrollEdgeEffectIds: Set<ObjectIdentifier> = []
   private var openTask: Task<Void, Never>?
   private var isReady = false
 
@@ -62,6 +64,9 @@ final class NovellaReadiumView: ExpoView, EPUBNavigatorDelegate, WKScriptMessage
   func setContentInsets(_ value: [String: Double]) {
     contentInsets = value
     navigator?.view.setNeedsLayout()
+    DispatchQueue.main.async { [weak self] in
+      self?.hideSystemScrollEdgeEffects()
+    }
   }
 
   func getCurrentLocator() async -> [String: Any]? {
@@ -90,6 +95,16 @@ final class NovellaReadiumView: ExpoView, EPUBNavigatorDelegate, WKScriptMessage
   override func layoutSubviews() {
     super.layoutSubviews()
     navigator?.view.frame = bounds
+    hideSystemScrollEdgeEffects()
+  }
+
+  override func didMoveToWindow() {
+    super.didMoveToWindow()
+    guard window != nil else { return }
+    hideSystemScrollEdgeEffects()
+    DispatchQueue.main.async { [weak self] in
+      self?.hideSystemScrollEdgeEffects()
+    }
   }
 
   private func scheduleOpen() {
@@ -168,6 +183,10 @@ final class NovellaReadiumView: ExpoView, EPUBNavigatorDelegate, WKScriptMessage
       addSubview(controller.view)
       controller.didMove(toParent: parent)
       controller.view.frame = bounds
+      hideSystemScrollEdgeEffects()
+      DispatchQueue.main.async { [weak self] in
+        self?.hideSystemScrollEdgeEffects()
+      }
       var installedStatus: [String: Any] = ["stage": "navigatorInstalled"]
       if let href = location?.href.description { installedStatus["href"] = href }
       onStatus(installedStatus)
@@ -192,6 +211,52 @@ final class NovellaReadiumView: ExpoView, EPUBNavigatorDelegate, WKScriptMessage
 
   private func applyPreferences() {
     navigator?.submitPreferences(makePreferences())
+  }
+
+  private func hideSystemScrollEdgeEffects() {
+    guard #available(iOS 26.0, *), let navigator else { return }
+    let scrollViews = descendantScrollViews(of: navigator.view)
+    let scrollViewIds = Set(scrollViews.map(ObjectIdentifier.init))
+    if scrollViewIds != observedScrollEdgeEffectIds {
+      scrollEdgeEffectObservations.forEach { $0.invalidate() }
+      scrollEdgeEffectObservations.removeAll()
+      observedScrollEdgeEffectIds = scrollViewIds
+      for scrollView in scrollViews {
+        scrollEdgeEffectObservations.append(
+          scrollView.observe(\.contentOffset, options: [.new]) { [weak self, weak scrollView] _, _ in
+            guard let self, let scrollView else { return }
+            self.hideSystemScrollEdgeEffects(on: scrollView)
+          }
+        )
+        scrollEdgeEffectObservations.append(
+          scrollView.observe(\.adjustedContentInset, options: [.new]) { [weak self, weak scrollView] _, _ in
+            guard let self, let scrollView else { return }
+            self.hideSystemScrollEdgeEffects(on: scrollView)
+          }
+        )
+      }
+    }
+    scrollViews.forEach { hideSystemScrollEdgeEffects(on: $0) }
+  }
+
+  private func hideSystemScrollEdgeEffects(on scrollView: UIScrollView) {
+    guard #available(iOS 26.0, *) else { return }
+    scrollView.topEdgeEffect.isHidden = true
+    scrollView.bottomEdgeEffect.isHidden = true
+    scrollView.leftEdgeEffect.isHidden = true
+    scrollView.rightEdgeEffect.isHidden = true
+  }
+
+  private func descendantScrollViews(of root: UIView) -> [UIScrollView] {
+    var result: [UIScrollView] = []
+    var pending = [root]
+    while let view = pending.popLast() {
+      if let scrollView = view as? UIScrollView {
+        result.append(scrollView)
+      }
+      pending.append(contentsOf: view.subviews)
+    }
+    return result
   }
 
   @MainActor private func installDirectionalNavigationAdapter() {
@@ -234,6 +299,7 @@ final class NovellaReadiumView: ExpoView, EPUBNavigatorDelegate, WKScriptMessage
   }
 
   func navigator(_ navigator: Navigator, locationDidChange locator: Locator) {
+    hideSystemScrollEdgeEffects()
     if !isReady {
       isReady = true
       onStatus(["stage": "resourceLoaded", "href": locator.href.description])
@@ -250,7 +316,12 @@ final class NovellaReadiumView: ExpoView, EPUBNavigatorDelegate, WKScriptMessage
     onError(["code": "navigator_error", "message": message, "recoverable": true])
   }
 
-  func navigator(_ navigator: VisualNavigator, presentationDidChange presentation: VisualNavigatorPresentation) {}
+  func navigator(_ navigator: VisualNavigator, presentationDidChange presentation: VisualNavigatorPresentation) {
+    hideSystemScrollEdgeEffects()
+    DispatchQueue.main.async { [weak self] in
+      self?.hideSystemScrollEdgeEffects()
+    }
+  }
 
   func navigator(_ navigator: VisualNavigator, didTapAt point: CGPoint) {}
 
@@ -301,6 +372,9 @@ final class NovellaReadiumView: ExpoView, EPUBNavigatorDelegate, WKScriptMessage
   }
 
   private func detachNavigator() {
+    scrollEdgeEffectObservations.forEach { $0.invalidate() }
+    scrollEdgeEffectObservations.removeAll()
+    observedScrollEdgeEffectIds.removeAll()
     directionalNavigationAdapter?.unbind()
     directionalNavigationAdapter = nil
     if let controller = navigator, let scrollNavigationObserver {

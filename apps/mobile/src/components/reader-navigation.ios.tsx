@@ -1,9 +1,11 @@
 import { Stack } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 
+import { IosTopBarBackground } from '@/components/ios-top-bar-background';
 import type { ReaderNavigationProps } from '@/components/reader-navigation.types';
 
 export function ReaderNavigation({
+  forceLightAppearance,
   foregroundColor,
   mode,
   onModeChange,
@@ -16,17 +18,28 @@ export function ReaderNavigation({
     <>
       <Stack.Screen
         options={{
+          headerBackground: () => null,
+          headerBlurEffect: 'none',
+          headerShadowVisible: false,
           headerTintColor: foregroundColor,
           headerTransparent: true,
+          ...(forceLightAppearance
+            ? {
+                unstable_nativeProps: {
+                  headerConfig: { experimental_userInterfaceStyle: 'light' },
+                },
+              }
+            : {}),
           scrollEdgeEffects: {
             bottom: 'hidden',
             left: 'hidden',
             right: 'hidden',
-            top: 'soft',
+            top: 'hidden',
           },
           title,
         }}
       />
+      <IosTopBarBackground />
       <Stack.Toolbar placement="right">
         <Stack.Toolbar.Button
           accessibilityLabel={t('accessibility.chapterList')}

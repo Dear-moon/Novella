@@ -56,6 +56,7 @@ import {
 import { BookCoverImage } from '@/components/book-cover-image';
 import { BookDetailNavigation } from '@/components/book-detail-navigation';
 import { useBookDetailRouteTheme } from '@/components/book-detail-theme-provider';
+import { IosTopBarBackground } from '@/components/ios-top-bar-background';
 import { BookHtmlContent } from '@/components/book-html-content';
 import {
   useBookDetail,
@@ -115,7 +116,7 @@ export function BookDetailScreen({
     ? initialCoverPlaceholder ?? book?.coverPlaceholder ?? null
     : book?.coverPlaceholder ?? null;
   const detailTheme = useBookDetailRouteTheme(bookId, coverUrl, coverPlaceholder);
-  const [usesSoftScrollEdge, setUsesSoftScrollEdge] = useState(false);
+  const [topBarBackgroundVisible, setTopBarBackgroundVisible] = useState(false);
   const displayBook = book ?? createLoadingBookDetail({
     bookId,
     coverUrl,
@@ -146,14 +147,14 @@ export function BookDetailScreen({
             coverUrl={coverUrl}
             isInShelf={isInShelf}
             isLoading={isLoading}
-            usesSoftScrollEdge={usesSoftScrollEdge}
             isShelfLoading={isShelfLoading}
             onToggleShelf={toggleShelf}
-            onScrollEdgeChange={setUsesSoftScrollEdge}
+            onTopBarBackgroundChange={setTopBarBackgroundVisible}
             palette={detailTheme.palette}
             shelfError={shelfError}
           />
         )}
+        <IosTopBarBackground visible={topBarBackgroundVisible} />
       </View>
     </PaperProvider>
   );
@@ -197,10 +198,9 @@ function BookDetailContent({
   coverUrl,
   isInShelf,
   isLoading,
-  usesSoftScrollEdge,
   isShelfLoading,
   onToggleShelf,
-  onScrollEdgeChange,
+  onTopBarBackgroundChange,
   palette,
   shelfError,
 }: {
@@ -210,10 +210,9 @@ function BookDetailContent({
   coverUrl: string | null;
   isInShelf: boolean;
   isLoading: boolean;
-  usesSoftScrollEdge: boolean;
   isShelfLoading: boolean;
   onToggleShelf: () => Promise<void>;
-  onScrollEdgeChange: (usesSoftScrollEdge: boolean) => void;
+  onTopBarBackgroundChange: (visible: boolean) => void;
   palette: BookDetailPalette;
   shelfError: BookUserMessage | null;
 }) {
@@ -252,18 +251,18 @@ function BookDetailContent({
   const isIos = process.env.EXPO_OS === 'ios';
   const heroHeight = BOOK_HERO_HEIGHT + topInset;
   const usesCollapsibleAppBar = process.env.EXPO_OS === 'android';
-  const usesSoftScrollEdgeRef = useRef(usesSoftScrollEdge);
+  const topBarBackgroundVisibleRef = useRef(false);
   const handleScroll = useCallback((offsetY: number) => {
     if (process.env.EXPO_OS !== 'ios') return;
 
-    if (!usesSoftScrollEdgeRef.current && offsetY >= BOOK_HERO_COLLAPSE_DISTANCE) {
-      usesSoftScrollEdgeRef.current = true;
-      onScrollEdgeChange(true);
-    } else if (usesSoftScrollEdgeRef.current && offsetY <= 1) {
-      usesSoftScrollEdgeRef.current = false;
-      onScrollEdgeChange(false);
+    if (!topBarBackgroundVisibleRef.current && offsetY >= BOOK_HERO_COLLAPSE_DISTANCE) {
+      topBarBackgroundVisibleRef.current = true;
+      onTopBarBackgroundChange(true);
+    } else if (topBarBackgroundVisibleRef.current && offsetY <= 1) {
+      topBarBackgroundVisibleRef.current = false;
+      onTopBarBackgroundChange(false);
     }
-  }, [onScrollEdgeChange]);
+  }, [onTopBarBackgroundChange]);
 
   return (
     <View style={[styles.detailContent, { backgroundColor: palette.surface }]}>
@@ -276,7 +275,7 @@ function BookDetailContent({
         />
       ) : null}
       <ScrollViewMarker
-        scrollEdgeEffects={{ top: usesSoftScrollEdge ? 'soft' : 'hidden' }}
+        scrollEdgeEffects={{ top: 'hidden' }}
         style={styles.scrollViewMarker}
       >
         <Animated.ScrollView

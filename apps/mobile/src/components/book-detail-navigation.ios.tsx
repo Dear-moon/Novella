@@ -11,7 +11,11 @@ const openVersions = (bookId: number, seriesTitle: string) => {
   });
 };
 
-export function BookDetailNavigation({ book, palette, seriesTitle }: BookDetailNavigationProps) {
+export function BookDetailNavigation({
+  book,
+  palette,
+  seriesTitle,
+}: BookDetailNavigationProps) {
   const { t } = useTranslation('book');
   const { t: tCommon } = useTranslation('common');
   const isComic = book?.type === 'Comic';
@@ -20,6 +24,7 @@ export function BookDetailNavigation({ book, palette, seriesTitle }: BookDetailN
       <Stack.Screen
         options={{
           contentStyle: { backgroundColor: palette.surface },
+          headerBackground: () => null,
           headerStyle: { backgroundColor: 'transparent' },
           headerBackVisible: false,
           headerTintColor: palette.primary,
