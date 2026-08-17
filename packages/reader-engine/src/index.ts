@@ -263,44 +263,202 @@ export function processNovelFootnotes(
   options: ProcessNovelFootnotesOptions = {},
 ): NovelFootnoteProcessingResult {
   const notesById: Record<string, string> = {};
-  const referencedIds = new Set<string>();
-  const anchorPattern = /<a\b[^>]*>[\s\S]*?<\/a\s*>/giu;
-  let preparedHtml = html.replace(anchorPattern, (anchor) => {
-    const openingTag = anchor.match(/^<a\b[^>]*>/iu)?.[0];
-    if (!openingTag) return anchor;
-    const classes = readHtmlAttribute(openingTag, 'class')?.split(/\s+/u) ?? [];
-    if (!classes.includes('duokan-footnote')) return anchor;
-    const existingId = readHtmlAttribute(openingTag, 'data-reader-footnote-id');
-    const href = readHtmlAttribute(openingTag, 'href');
-    const id = existingId ?? (href?.startsWith('#') ? href.slice(1) : '');
-    if (!id) return anchor;
-    referencedIds.add(id);
-    const withoutHref = openingTag.replace(
-      /\s+href\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/iu,
-      '',
-    );
-    const nextOpeningTag = existingId
-      ? withoutHref
-      : withoutHref.replace(/>$/u, ` data-reader-footnote-id="${escapeHtmlAttribute(id)}">`);
-    // DOM-based renderers can remove the marker entirely and place the note
-    // content in flow. The legacy RN renderer keeps one textual placeholder.
-    const markerContent = options.markerContent === 'empty' ? '' : '*';
-    return `${nextOpeningTag}${markerContent}</a>`;
-  });
+  const elements = parseHtmlElementRanges(html);
+  const markers = selectOutermostFootnoteMarkers(elements, html);
+  const markerContent = options.markerContent === 'empty' ? '' : '*';
+  const replacements: HtmlReplacement[] = [];
+  const removedTargets = new Set<string>();
 
-  referencedIds.forEach((id) => {
-    const escapedId = escapeRegExp(id);
-    const notePattern = new RegExp(
-      `<([a-z][\\w:-]*)\\b(?=[^>]*\\sid\\s*=\\s*(?:"${escapedId}"|'${escapedId}'|${escapedId}(?=\\s|>)))[^>]*>([\\s\\S]*?)<\\/\\1\\s*>`,
-      'iu',
-    );
-    const note = preparedHtml.match(notePattern);
-    if (!note) return;
-    notesById[id] = note[2] ?? '';
-    preparedHtml = preparedHtml.replace(note[0], '');
-  });
+  for (const marker of markers) {
+    const existingId = readHtmlAttribute(marker.openingTag, 'data-reader-footnote-id')
+      ?? readHtmlAttribute(marker.openingTag, 'data-footnote-id');
+    const href = readHtmlAttribute(marker.openingTag, 'href');
+    const id = existingId ?? footnoteFragmentId(href);
+    if (!id) continue;
 
-  return { html: preparedHtml, notesById };
+    replacements.push({
+      start: marker.start,
+      end: marker.end,
+      value: `<a data-reader-footnote-id="${escapeHtmlAttribute(id)}">${markerContent}</a>`,
+    });
+
+    const note = findFootnoteTarget(elements, id)
+      ?? findFollowingLegacyFootnoteTarget(elements, marker, markers);
+    if (!note || removedTargets.has(`${note.start}:${note.end}`)) continue;
+    notesById[id] = html.slice(note.openingEnd, note.closingStart);
+    removedTargets.add(`${note.start}:${note.end}`);
+    replacements.push({ start: note.start, end: note.end, value: '' });
+  }
+
+  return { html: applyHtmlReplacements(html, replacements), notesById };
+}
+
+function findFootnoteTarget(
+  elements: readonly HtmlElementRange[],
+  id: string,
+): HtmlElementRange | undefined {
+  const target = elements.find((element) => readHtmlAttribute(element.openingTag, 'id') === id);
+  if (target) return target;
+
+  const namedTarget = elements.find((element) =>
+    element.tag === 'a' && readHtmlAttribute(element.openingTag, 'name') === id
+  );
+  if (!namedTarget) return undefined;
+
+  const containingListItem = elements
+    .filter((element) =>
+      element.tag === 'li'
+      && element.start <= namedTarget.start
+      && element.end >= namedTarget.end,
+    )
+    .sort((left, right) => (left.end - left.start) - (right.end - right.start))[0];
+  return containingListItem ?? namedTarget;
+}
+
+function findFollowingLegacyFootnoteTarget(
+  elements: readonly HtmlElementRange[],
+  marker: HtmlElementRange,
+  markers: readonly HtmlElementRange[],
+): HtmlElementRange | undefined {
+  const nextMarkerStart = markers
+    .filter((candidate) => candidate.start > marker.start)
+    .map((candidate) => candidate.start)
+    .sort((left, right) => left - right)[0] ?? Number.POSITIVE_INFINITY;
+  const candidate = elements.find((element) =>
+    element.tag === 'li'
+    && element.start > marker.end
+    && element.start < nextMarkerStart
+    && /^\d+$/u.test(readHtmlAttribute(element.openingTag, 'data-line') ?? ''),
+  );
+  if (!candidate) return undefined;
+
+  const containingList = elements
+    .filter((element) =>
+      (element.tag === 'ol' || element.tag === 'ul')
+      && element.start <= candidate.start
+      && element.end >= candidate.end,
+    )
+    .sort((left, right) => (left.end - left.start) - (right.end - right.start))[0];
+  if (!containingList) return candidate;
+
+  const listItems = elements.filter((element) =>
+    element.tag === 'li'
+    && element.start >= containingList.start
+    && element.end <= containingList.end,
+  );
+  return listItems.length === 1 ? containingList : candidate;
+}
+
+function footnoteFragmentId(href: string | undefined): string {
+  if (!href) return '';
+  const hash = href.indexOf('#');
+  if (hash < 0 || hash === href.length - 1) return '';
+  const fragment = href.slice(hash + 1);
+  try {
+    return decodeURIComponent(fragment);
+  } catch {
+    return fragment;
+  }
+}
+
+interface HtmlElementRange {
+  closingStart: number;
+  end: number;
+  openingEnd: number;
+  openingTag: string;
+  start: number;
+  tag: string;
+}
+
+interface HtmlReplacement {
+  end: number;
+  start: number;
+  value: string;
+}
+
+interface OpenHtmlElement {
+  openingEnd: number;
+  openingTag: string;
+  start: number;
+  tag: string;
+}
+
+const VOID_HTML_TAGS = new Set([
+  'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta',
+  'param', 'source', 'track', 'wbr',
+]);
+
+function parseHtmlElementRanges(html: string): HtmlElementRange[] {
+  const elements: HtmlElementRange[] = [];
+  const stack: OpenHtmlElement[] = [];
+  const tagPattern = /<!--[\s\S]*?-->|<\/?([a-z][\w:-]*)\b[^>]*>/giu;
+  let match: RegExpExecArray | null;
+  while ((match = tagPattern.exec(html)) !== null) {
+    const token = match[0];
+    const tag = match[1]?.toLowerCase();
+    if (!tag || token.startsWith('<!--')) continue;
+    if (token.startsWith('</')) {
+      const reverseIndex = [...stack].reverse().findIndex((element) => element.tag === tag);
+      if (reverseIndex < 0) continue;
+      const index = stack.length - 1 - reverseIndex;
+      const opening = stack[index];
+      if (!opening) continue;
+      stack.splice(index, 1);
+      elements.push({
+        ...opening,
+        closingStart: match.index,
+        end: match.index + token.length,
+      });
+      continue;
+    }
+
+    const opening: OpenHtmlElement = {
+      openingEnd: match.index + token.length,
+      openingTag: token,
+      start: match.index,
+      tag,
+    };
+    if (token.endsWith('/>') || VOID_HTML_TAGS.has(tag)) {
+      elements.push({
+        ...opening,
+        closingStart: opening.openingEnd,
+        end: opening.openingEnd,
+      });
+    } else {
+      stack.push(opening);
+    }
+  }
+  return elements.sort((left, right) => left.start - right.start || right.end - left.end);
+}
+
+function selectOutermostFootnoteMarkers(
+  elements: readonly HtmlElementRange[],
+  html: string,
+): HtmlElementRange[] {
+  const markers = elements.filter((element) => {
+    const classes = readHtmlAttribute(element.openingTag, 'class')?.split(/\s+/u) ?? [];
+    if (classes.includes('duokan-footnote')) return true;
+    if (element.tag !== 'a') return false;
+    const href = readHtmlAttribute(element.openingTag, 'href');
+    if (!href?.startsWith('#')) return false;
+    const innerHtml = html.slice(element.openingEnd, element.closingStart);
+    return /<img\b[^>]*\bsrc\s*=\s*(?:"[^"]*note\.png(?:[?#][^"]*)?"|'[^']*note\.png(?:[?#][^']*)?'|[^\s>]*note\.png(?:[?#\s>]))/iu.test(innerHtml);
+  });
+  return markers.filter((candidate, index) => !markers.some((other, otherIndex) =>
+    otherIndex < index
+    && other.start <= candidate.start
+    && other.end >= candidate.end
+  ));
+}
+
+function applyHtmlReplacements(html: string, replacements: readonly HtmlReplacement[]): string {
+  return [...replacements]
+    .sort((left, right) => right.start - left.start)
+    .reduce(
+      (output, replacement) =>
+        `${output.slice(0, replacement.start)}${replacement.value}${output.slice(replacement.end)}`,
+      html,
+    );
 }
 
 function decodeNumericHtmlEntity(token: string): number | null {

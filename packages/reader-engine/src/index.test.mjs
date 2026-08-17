@@ -126,6 +126,81 @@ test('can remove source footnote marker content for inline notes', () => {
   assert.doesNotMatch(result.html, /marker\.png|>\*<\/a>|<ol/);
 });
 
+test('extracts Web-Master footnote class markers regardless of their element tag', () => {
+  const result = processNovelFootnotes(
+    '<p>正文<sup class="note duokan-footnote" href="#note-2"><img class="footnote" src="bad-marker.png"></sup>段末。</p>' +
+      '<ul id="note-2"><li>注释：原文 QOL</li></ul>' +
+      '<p><img class="illustration" src="ordinary.png" alt="ordinary"></p>',
+  );
+
+  assert.equal(result.notesById['note-2'], '<li>注释：原文 QOL</li>');
+  assert.match(result.html, /正文<a data-reader-footnote-id="note-2">\*<\/a>段末。/);
+  assert.doesNotMatch(result.html, /bad-marker\.png|<ul id="note-2"/);
+  assert.match(result.html, /<img class="illustration" src="ordinary\.png" alt="ordinary">/);
+});
+
+test('replaces a void image footnote marker without touching ordinary images', () => {
+  const result = processNovelFootnotes(
+    '<p>正文<img class="footnote duokan-footnote" href="#note-3" src="bad-marker.png">。</p>' +
+      '<ol id="note-3"><li>注释内容</li></ol>' +
+      '<img class="footnote" src="unlinked.png">',
+    { markerContent: 'empty' },
+  );
+
+  assert.equal(result.notesById['note-3'], '<li>注释内容</li>');
+  assert.match(result.html, /正文<a data-reader-footnote-id="note-3"><\/a>。/);
+  assert.doesNotMatch(result.html, /bad-marker\.png|<ol id="note-3"/);
+  assert.match(result.html, /<img class="footnote" src="unlinked\.png">/);
+});
+
+test('recognizes the legacy note image shape without a footnote class', () => {
+  const result = processNovelFootnotes(
+    '<p>正文<a href="#note-4"><sup><img src="/img/note.png" class=""></sup></a>段末。</p>' +
+      '<ol id="note-4"><li>注释内容</li></ol>',
+    { markerContent: 'empty' },
+  );
+
+  assert.equal(result.notesById['note-4'], '<li>注释内容</li>');
+  assert.match(result.html, /正文<a data-reader-footnote-id="note-4"><\/a>段末。/);
+  assert.doesNotMatch(result.html, /note\.png|<ol id="note-4"/);
+});
+
+test('recognizes a data-line list item after a legacy marker', () => {
+  const result = processNovelFootnotes(
+    '<p>正文<a href="#note-6"><sup><img src="/img/note.png"></sup></a>段末。</p>' +
+      '<ol><li data-line="86"><p>注释内容</p></li></ol><p>后文</p>',
+    { markerContent: 'empty' },
+  );
+
+  assert.equal(result.notesById['note-6'], '<li data-line="86"><p>注释内容</p></li>');
+  assert.match(result.html, /正文<a data-reader-footnote-id="note-6"><\/a>段末。/);
+  assert.doesNotMatch(result.html, /data-line="86"|note\.png|注释内容/);
+});
+
+test('does not treat an ordinary list as a footnote target', () => {
+  const result = processNovelFootnotes(
+    '<p>正文<a href="#missing"><sup><img src="/img/note.png"></sup></a>段末。</p>' +
+      '<ol><li>普通列表</li></ol>',
+    { markerContent: 'empty' },
+  );
+
+  assert.equal(result.notesById.missing, undefined);
+  assert.match(result.html, /普通列表/);
+  assert.match(result.html, /<li>普通列表<\/li>/);
+});
+
+test('recognizes named-anchor footnote targets inside legacy list items', () => {
+  const result = processNovelFootnotes(
+    '<p>正文<a href="#note-5"><sup><img src="/img/note.png"></sup></a>段末。</p>' +
+      '<ol><li data-line="86"><a name="note-5"></a><p>注释内容</p></li></ol>',
+    { markerContent: 'empty' },
+  );
+
+  assert.equal(result.notesById['note-5'], '<a name="note-5"></a><p>注释内容</p>');
+  assert.match(result.html, /正文<a data-reader-footnote-id="note-5"><\/a>段末。/);
+  assert.doesNotMatch(result.html, /name="note-5"|data-line="86"|note\.png/);
+});
+
 test('restores an inline Web XPath to its nearest reader block ancestor', () => {
   const blocks = normalizeNovelBlocks(
     '<div><p>第一段</p><p><span>第二段</span></p><p>第三段</p></div>',
