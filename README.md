@@ -6,10 +6,12 @@
 
 <a href="https://trendshift.io/repositories/22931?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-22931" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/22931" alt="celia-sh%2FNovella | Trendshift" width="250" height="55"/></a>
 
-![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
-![React Native](https://img.shields.io/badge/React%20Native-61DAFB?logo=react&logoColor=black)
-![Expo](https://img.shields.io/badge/Expo-000020?logo=expo&logoColor=white)
-![License](https://img.shields.io/badge/License-AGPL%203.0-blue)
+<p>
+  <img src="assets/badges/typescript.svg" alt="TypeScript" height="24" />
+  <img src="assets/badges/react-native.svg" alt="React Native" height="24" />
+  <img src="assets/badges/expo.svg" alt="Expo" height="24" />
+  <img src="assets/badges/license.svg" alt="License: AGPL 3.0" height="24" />
+</p>
 
 轻书架第三方客户端。
 
