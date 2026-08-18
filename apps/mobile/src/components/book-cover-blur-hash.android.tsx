@@ -1,6 +1,3 @@
-import { Host } from '@expo/ui';
-import { fillMaxSize } from '@expo/ui/jetpack-compose/modifiers';
-import { Image } from 'expo-image';
 import { StyleSheet } from 'react-native';
 
 import { NativeBlurHash } from '../../modules/novella-ui';
@@ -13,21 +10,11 @@ export function BookCoverBlurHash({
   placeholder: ExpoBlurHashPlaceholder;
 }) {
   return (
-    <>
-      <Image
-        accessibilityElementsHidden
-        contentFit="cover"
-        source={placeholder}
-        style={StyleSheet.absoluteFill}
-      />
-      <Host style={StyleSheet.absoluteFill} useViewportSizeMeasurement>
-        <NativeBlurHash
-          blurHash={placeholder.blurhash}
-          height={placeholder.height}
-          modifiers={[fillMaxSize()]}
-          width={placeholder.width}
-        />
-      </Host>
-    </>
+    <NativeBlurHash
+      blurHash={placeholder.blurhash}
+      decodeHeight={placeholder.height}
+      decodeWidth={placeholder.width}
+      style={StyleSheet.absoluteFill}
+    />
   );
 }

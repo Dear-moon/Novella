@@ -1,5 +1,6 @@
 import { router, Stack } from 'expo-router';
 import { IconTrophy } from '@tabler/icons-react-native';
+import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   FlatList,
@@ -21,6 +22,7 @@ import {
   bookGridSkeletonCount,
   skeletonKeys,
 } from '@/components/book-grid-skeleton';
+import { IosScrollViewMarker } from '@/components/ios-scroll-view-marker';
 import { NativeScreenScaffold } from '@/components/native-screen-scaffold';
 import { NativeSegmentedControl } from '@/components/native-segmented-control';
 import { useBookGridLayout } from '@/hooks/use-book-grid-layout';
@@ -57,6 +59,17 @@ export function RankingScreen() {
     keyForItem: (item) => typeof item === 'number' ? null : rankingCoverKey(item),
     scopeKey: `${period}:${listKey}`,
   });
+  const openBook = useCallback((book: BookListItem) => router.push({
+    pathname: '/book/[id]',
+    params: {
+      cover: book.coverUrl,
+      id: String(book.id),
+      placeholder: book.coverPlaceholder ?? '',
+      ...(book.type === 'Comic' ? { seriesTitle: book.seriesTitle ?? book.title } : {}),
+      title: book.title,
+      type: book.type ?? 'Novel',
+    },
+  }), []);
   const periodOptions: readonly { label: string; value: RankPeriod }[] = [
     { label: t('ranking.periods.daily'), value: 'daily' },
     { label: t('ranking.periods.weekly'), value: 'weekly' },
@@ -67,13 +80,13 @@ export function RankingScreen() {
     <>
       <Stack.Screen options={{ title: t('ranking.title') }} />
       <NativeScreenScaffold
-      largeTitle={false}
-      onBackPress={() => router.back()}
-      showBackButton
-      title={t('ranking.title')}
-    >
-      <View style={styles.root}>
-        <FlatList
+        largeTitle={false}
+        onBackPress={() => router.back()}
+        showBackButton
+        title={t('ranking.title')}
+      >
+        <IosScrollViewMarker style={styles.root}>
+          <FlatList
           ListEmptyComponent={
             error ? (
               <ErrorState error={error} onRetry={retry} />
@@ -108,6 +121,9 @@ export function RankingScreen() {
               tintColor={colors.accent as string}
             />
           }
+          // Android-only, like every other list here: on iOS this prop is known
+          // to blank out cells in multi-column lists.
+          removeClippedSubviews={process.env.EXPO_OS === 'android'}
           renderItem={({ item, index }) =>
             typeof item === 'number' ? (
               <BookCoverSkeletonTile tileWidth={tileWidth} />
@@ -115,28 +131,16 @@ export function RankingScreen() {
               <BookCoverGridItem
                 book={item}
                 networkImageEnabled={coverActivation.activatedKeys.has(rankingCoverKey(item))}
-                onPress={() => router.push({
-                  pathname: '/book/[id]',
-                  params: {
-                    cover: item.coverUrl,
-                    id: String(item.id),
-                    placeholder: item.coverPlaceholder ?? '',
-                    ...(item.type === 'Comic'
-                      ? { seriesTitle: item.seriesTitle ?? item.title }
-                      : {}),
-                    title: item.title,
-                    type: item.type ?? 'Novel',
-                  },
-                })}
+                onPress={openBook}
                 rank={index + 1}
                 tileWidth={tileWidth}
               />
             )
           }
           showsVerticalScrollIndicator={false}
-          viewabilityConfig={coverActivation.viewabilityConfig}
-        />
-      </View>
+            viewabilityConfig={coverActivation.viewabilityConfig}
+          />
+        </IosScrollViewMarker>
       </NativeScreenScaffold>
     </>
   );

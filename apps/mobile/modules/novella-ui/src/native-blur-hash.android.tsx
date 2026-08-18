@@ -1,21 +1,12 @@
-import type { PrimitiveBaseProps } from '@expo/ui/jetpack-compose';
-import { createViewModifierEventListener } from '@expo/ui/jetpack-compose/modifiers';
 import { requireNativeView } from 'expo';
+import type { StyleProp, ViewStyle } from 'react-native';
 
-export interface NativeBlurHashProps extends PrimitiveBaseProps {
+export interface NativeBlurHashProps {
   blurHash: string;
-  height: number;
-  width: number;
+  /** Decode resolution in pixels, not layout size. */
+  decodeHeight: number;
+  decodeWidth: number;
+  style?: StyleProp<ViewStyle>;
 }
 
-const NativeView = requireNativeView<NativeBlurHashProps>('NovellaUi', 'BlurHash');
-
-export function NativeBlurHash({ modifiers, ...props }: NativeBlurHashProps) {
-  return (
-    <NativeView
-      {...props}
-      {...(modifiers ? { modifiers } : {})}
-      {...(modifiers ? createViewModifierEventListener(modifiers) : {})}
-    />
-  );
-}
+export const NativeBlurHash = requireNativeView<NativeBlurHashProps>('NovellaUi', 'BlurHash');
