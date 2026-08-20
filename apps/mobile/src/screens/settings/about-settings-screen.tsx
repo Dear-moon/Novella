@@ -12,7 +12,7 @@ import { updateAppSettings, useAppSettings } from '@/services/settings';
 const repositoryUrl = 'https://github.com/celia-sh/Novella';
 const novellaUrl = 'https://novella.celia.sh';
 const lightNovelShelfUrl = 'https://www.lightnovel.app';
-const lightNovelGroupUrl = 'https://t.me/+J5xdTWVGOJMyOWRl';
+const lightNovelGroupUrl = 'https://t.me/+zD4ACGdOROs3MmI1';
 const developerGroupUrl = 'https://t.me/+rZYx8H_TvUpmZjJh';
 
 function displayVersion(unknownVersion: string): string {
