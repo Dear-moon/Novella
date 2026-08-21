@@ -1587,13 +1587,25 @@ export function decodeDailyCheckInResult(value: unknown): DailyCheckInResult {
 
 export function decodeUserShelf(value: unknown): UserShelf {
   const record = isRecord(value) ? value : null;
-  const rawItems = Array.isArray(value)
-    ? value
-    : record && Array.isArray(record.data)
+  let rawItems: unknown[] | null;
+  if (Array.isArray(value)) {
+    rawItems = value;
+  } else if (value === null || value === undefined) {
+    // Accounts that have never saved a shelf can receive a null payload.
+    rawItems = [];
+  } else if (record !== null) {
+    // The service has returned both { data: [...] } and { Data: [...] } over
+    // time. An absent/null data field is the valid empty-shelf response.
+    rawItems = Array.isArray(record.data)
       ? record.data
-      : record && Array.isArray(record.Data)
+      : Array.isArray(record.Data)
         ? record.Data
-        : null;
+        : record.data === null || record.data === undefined
+          ? record.Data === null || record.Data === undefined ? [] : null
+          : null;
+  } else {
+    rawItems = null;
+  }
   if (rawItems === null) {
     throw new ApiError('Invalid shelf response.', 'server');
   }

@@ -13,6 +13,7 @@ import {
   decodeCommunityHome,
   decodeCommunityThread,
   decodeUserProfile,
+  decodeUserShelf,
   extractBlurHashPlaceholder,
   normalizeBlurHash,
   normalizeCoverUrl,
@@ -488,6 +489,15 @@ test('decodes dual-format history and comic history hydration', async () => {
     { Ids: [11, 10], Type: 'Comic' },
     { UseGzip: true },
   ]);
+});
+
+test('treats null and empty shelf payloads as an empty shelf', () => {
+  for (const value of [null, {}, { data: null }, { Data: null }]) {
+    assert.deepEqual(decodeUserShelf(value), {
+      version: null,
+      items: [],
+    });
+  }
 });
 
 test('round-trips the versioned shelf document payload', async () => {
