@@ -79,7 +79,7 @@ export interface AppSettings {
 const DEFAULT_SETTINGS: AppSettings = {
   bookDetailCacheEnabled: true,
   cleanChapterTitleScopes: CLEAN_CHAPTER_TITLE_SCOPES,
-  coverColorExtraction: false,
+  coverColorExtraction: true,
   dynamicSchemeVariant: 'tonalSpot',
   fontCacheEnabled: true,
   fontCacheLimit: 30,
