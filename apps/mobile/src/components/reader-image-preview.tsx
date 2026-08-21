@@ -1,7 +1,21 @@
 import { IconDownload, IconShare, IconX } from '@tabler/icons-react-native';
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useTranslation } from 'react-i18next';
 import { Image } from 'expo-image';
+import {
+  Canvas,
+  Image as SkiaImage,
+  type SkImage,
+} from '@shopify/react-native-skia';
 import {
   ActivityIndicator,
   Modal,
@@ -36,15 +50,103 @@ const ACTION_BUTTON_SIZE = 44;
 export interface ReaderImagePreviewSource {
   uri: string;
   alt?: string;
+  /** Already-decoded pixels owned by the mounted Skia reader tile. */
+  skiaImage?: SkImage;
 }
 
 export interface ReaderImagePreviewProps {
   source: ReaderImagePreviewSource;
   onClose: () => void;
+  /** Hide decoded pixels for one frame so modal chrome can paint first. */
+  revealImage?: boolean;
+  visible?: boolean;
 }
 
+export interface ReaderImagePreviewHostHandle {
+  open(source: ReaderImagePreviewSource): void;
+}
+
+interface ReaderImagePreviewHostState {
+  revealImage: boolean;
+  source: ReaderImagePreviewSource | null;
+  visible: boolean;
+}
+
+const EMPTY_PREVIEW_STATE: ReaderImagePreviewHostState = {
+  revealImage: false,
+  source: null,
+  visible: false,
+};
+
+/**
+ * Keeps preview state out of ReaderScreen so opening/closing never reconciles
+ * the chapter FlatList. Presentation and pixel work happen on separate frames;
+ * dismissal hides the modal before releasing its Skia canvas.
+ */
+export const ReaderImagePreviewHost = forwardRef<
+  ReaderImagePreviewHostHandle,
+  object
+>(function ReaderImagePreviewHost(_props, ref) {
+  const [state, setState] = useState<ReaderImagePreviewHostState>(EMPTY_PREVIEW_STATE);
+  const revealFrameRef = useRef<number | null>(null);
+  const cleanupFrameRef = useRef<number | null>(null);
+
+  const cancelScheduledFrames = useCallback(() => {
+    if (revealFrameRef.current !== null) cancelAnimationFrame(revealFrameRef.current);
+    if (cleanupFrameRef.current !== null) cancelAnimationFrame(cleanupFrameRef.current);
+    revealFrameRef.current = null;
+    cleanupFrameRef.current = null;
+  }, []);
+
+  useEffect(() => cancelScheduledFrames, [cancelScheduledFrames]);
+
+  const open = useCallback((source: ReaderImagePreviewSource) => {
+    cancelScheduledFrames();
+    setState({ revealImage: false, source, visible: true });
+    revealFrameRef.current = requestAnimationFrame(() => {
+      revealFrameRef.current = null;
+      setState((current) => current.source === source
+        ? { ...current, revealImage: true }
+        : current);
+    });
+  }, [cancelScheduledFrames]);
+
+  const close = useCallback(() => {
+    cancelScheduledFrames();
+    // First commit only hides the native modal. Keep the image tree intact so
+    // Skia disposal cannot delay the close-button response.
+    setState((current) => current.source
+      ? { ...current, visible: false }
+      : current);
+    revealFrameRef.current = requestAnimationFrame(() => {
+      revealFrameRef.current = null;
+      cleanupFrameRef.current = requestAnimationFrame(() => {
+        cleanupFrameRef.current = null;
+        setState((current) => current.visible ? current : EMPTY_PREVIEW_STATE);
+      });
+    });
+  }, [cancelScheduledFrames]);
+
+  useImperativeHandle(ref, () => ({ open }), [open]);
+
+  if (!state.source) return null;
+  return (
+    <ReaderImagePreview
+      onClose={close}
+      revealImage={state.revealImage}
+      source={state.source}
+      visible={state.visible}
+    />
+  );
+});
+
 /** Full-screen reader image preview with Flutter-equivalent actions and zoom. */
-export function ReaderImagePreview({ source, onClose }: ReaderImagePreviewProps) {
+export function ReaderImagePreview({
+  source,
+  onClose,
+  revealImage = true,
+  visible = true,
+}: ReaderImagePreviewProps) {
   const { t } = useTranslation('reader');
   const { width, height } = useWindowDimensions();
   // Read the stable app-window bottom inset before presenting the transparent
@@ -52,7 +154,8 @@ export function ReaderImagePreview({ source, onClose }: ReaderImagePreviewProps)
   // from transient Dynamic Island metrics during the first presentation.
   const { bottom: bottomInset } = useSafeAreaInsets();
   const imageUri = resolveReaderImageUrl(source.uri);
-  const [isLoading, setIsLoading] = useState(true);
+  const warmImage = source.skiaImage;
+  const [isLoading, setIsLoading] = useState(warmImage === undefined);
   const [hasError, setHasError] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
@@ -74,51 +177,64 @@ export function ReaderImagePreview({ source, onClose }: ReaderImagePreviewProps)
     onClose();
   }, [onClose]);
 
-  const pinch = Gesture.Pinch()
-    .onBegin(() => {
-      pinchStartScale.value = savedScale.value;
-    })
-    .onUpdate((event) => {
-      scale.value = clamp(
-        pinchStartScale.value * event.scale,
-        1,
-        READER_IMAGE_PREVIEW_MAX_ZOOM,
-      );
-    })
-    .onEnd(() => {
-      savedScale.value = scale.value;
-      if (scale.value <= 1) {
-        translationX.value = withTiming(0, { duration: 160 });
-        translationY.value = withTiming(0, { duration: 160 });
+  const gesture = useMemo(() => {
+    const pinch = Gesture.Pinch()
+      .onBegin(() => {
+        pinchStartScale.value = savedScale.value;
+      })
+      .onUpdate((event) => {
+        scale.value = clamp(
+          pinchStartScale.value * event.scale,
+          1,
+          READER_IMAGE_PREVIEW_MAX_ZOOM,
+        );
+      })
+      .onEnd(() => {
+        savedScale.value = scale.value;
+        if (scale.value <= 1) {
+          translationX.value = withTiming(0, { duration: 160 });
+          translationY.value = withTiming(0, { duration: 160 });
+        }
+      });
+
+    const pan = Gesture.Pan()
+      .onBegin(() => {
+        panStartX.value = translationX.value;
+        panStartY.value = translationY.value;
+      })
+      .onUpdate((event) => {
+        if (scale.value <= 1) return;
+        const maxX = Math.max(0, (width * (scale.value - 1)) / 2);
+        const maxY = Math.max(0, (height * (scale.value - 1)) / 2);
+        translationX.value = clamp(panStartX.value + event.translationX, -maxX, maxX);
+        translationY.value = clamp(panStartY.value + event.translationY, -maxY, maxY);
+      })
+      .onEnd(() => {
+        if (scale.value <= 1) {
+          translationX.value = withTiming(0, { duration: 160 });
+          translationY.value = withTiming(0, { duration: 160 });
+        }
+      });
+
+    const tap = Gesture.Tap().onEnd((_event, success) => {
+      if (success && scale.value <= 1.01) {
+        runOnJS(closeFromGesture)();
       }
     });
 
-  const pan = Gesture.Pan()
-    .onBegin(() => {
-      panStartX.value = translationX.value;
-      panStartY.value = translationY.value;
-    })
-    .onUpdate((event) => {
-      if (scale.value <= 1) return;
-      const maxX = Math.max(0, (width * (scale.value - 1)) / 2);
-      const maxY = Math.max(0, (height * (scale.value - 1)) / 2);
-      translationX.value = clamp(panStartX.value + event.translationX, -maxX, maxX);
-      translationY.value = clamp(panStartY.value + event.translationY, -maxY, maxY);
-    })
-    .onEnd(() => {
-      if (scale.value <= 1) {
-        translationX.value = withTiming(0, { duration: 160 });
-        translationY.value = withTiming(0, { duration: 160 });
-      }
-    });
-
-  const tap = Gesture.Tap().onEnd((_event, success) => {
-    if (success && scale.value <= 1.01) {
-      runOnJS(closeFromGesture)();
-    }
-  });
-
-  const gesture = Gesture.Simultaneous(pinch, pan, tap);
+    return Gesture.Simultaneous(pinch, pan, tap);
+  }, [
+    closeFromGesture,
+    height,
+    panStartX,
+    panStartY,
+    pinchStartScale,
+    savedScale,
+    scale,
+    translationX,
+    translationY,
+    width,
+  ]);
   const imageStyle = useAnimatedStyle(() => ({
     transform: [
       { scale: scale.value },
@@ -176,25 +292,40 @@ export function ReaderImagePreview({ source, onClose }: ReaderImagePreviewProps)
 
   return (
     <Modal
-      animationType="fade"
+      animationType="none"
       hardwareAccelerated
       onRequestClose={onClose}
       navigationBarTranslucent
       presentationStyle="overFullScreen"
       statusBarTranslucent
       transparent
-      visible
+      visible={visible}
     >
       <GestureHandlerRootView style={styles.modalRoot}>
         <View style={styles.backdrop}>
           <StatusBar style="light" />
           <GestureDetector gesture={gesture}>
             <Animated.View style={[styles.imageFrame, imageStyle]}>
-              {hasError ? (
+              {revealImage && hasError ? (
                 <View style={styles.errorState}>
                   <Text style={styles.errorText}>{t('images.loadFailed')}</Text>
                 </View>
-              ) : (
+              ) : revealImage && warmImage ? (
+                <Canvas
+                  accessibilityLabel={source.alt?.trim() || t('images.illustration')}
+                  accessible
+                  style={styles.image}
+                >
+                  <SkiaImage
+                    fit="contain"
+                    height={height}
+                    image={warmImage}
+                    width={width}
+                    x={0}
+                    y={0}
+                  />
+                </Canvas>
+              ) : revealImage ? (
                 <Image
                   accessibilityLabel={source.alt?.trim() || t('images.illustration')}
                   cachePolicy="memory-disk"
@@ -217,8 +348,8 @@ export function ReaderImagePreview({ source, onClose }: ReaderImagePreviewProps)
                   source={{ uri: imageUri }}
                   style={styles.image}
                 />
-              )}
-              {isLoading && !hasError ? (
+              ) : null}
+              {(!revealImage || isLoading) && !hasError ? (
                 <View pointerEvents="none" style={styles.loadingState}>
                   <ActivityIndicator color="rgba(255,255,255,0.92)" size="small" />
                 </View>

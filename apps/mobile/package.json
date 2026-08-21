@@ -10,7 +10,9 @@
     "@microsoft/signalr": "^9.0.6",
     "@microsoft/signalr-protocol-msgpack": "^9.0.6",
     "@novella/client-core": "0.0.0",
+    "@novella/reader-layout": "file:../../packages/reader-layout",
     "@react-native-masked-view/masked-view": "0.3.2",
+    "@shopify/react-native-skia": "2.6.2",
     "@tabler/icons-react-native": "^3.46.0",
     "expo": "~57.0.9",
     "expo-asset": "~57.0.8",
@@ -56,7 +58,8 @@
     "tailwind-merge": "^3.6.0",
     "tailwind-variants": "^3.3.0",
     "tailwindcss": "^4.3.3",
-    "uniwind": "^1.10.0"
+    "uniwind": "^1.10.0",
+    "woff-lib": "^0.0.3"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
@@ -73,7 +76,7 @@
     "test:community": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test src/services/app-announcements.test.mjs src/services/comment-list-rows.test.mjs src/services/comment-target.test.mjs src/services/community-thread-rows.test.mjs src/services/community-utils.test.mjs src/services/community-board-icon-keys.test.mjs",
     "test:localization": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test src/localization/locale.test.mjs src/localization/formatters.test.mjs src/localization/resources.test.mjs",
     "test:plugins": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test plugins/with-android-signing.test.mjs",
-    "test:reader": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test src/services/comic-reader-layout.test.mjs src/services/reader-chrome-layout.test.mjs src/services/reader-image-format.test.mjs src/services/reader-locator-mapping.test.mjs src/services/reader-xhtml-builder.test.mjs src/services/readium-publication.test.mjs",
+    "test:reader": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test src/services/comic-reader-layout.test.mjs src/services/reader-chrome-layout.test.mjs src/services/reader-image-format.test.mjs src/services/reader-reflow-position.test.mjs src/services/reader-xhtml-builder.test.mjs",
     "test:shelf": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test src/services/shelf-grid-reorder.test.mjs src/services/shelf-editing.test.mjs src/services/book-grid-layout.test.mjs src/services/chapter-title.test.mjs src/services/content-filter.test.mjs src/services/book-badge-definitions.test.mjs",
     "test:theme": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test src/theme/auth-theme.test.mjs src/theme/hero-ui-theme.test.mjs",
     "test:update": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test src/services/app-update.test.mjs",

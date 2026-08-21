@@ -35,6 +35,8 @@ export interface NovelReaderBlock {
   html: string;
   textLength: number;
   imageCount: number;
+  listMarker?: string;
+  listDepth?: number;
 }
 
 export interface ReaderPageSlice {
@@ -225,6 +227,7 @@ export function normalizeNovelBlocks(
   const result = blocks.map((node) => createNovelBlock(
     node.path,
     source.slice(node.start, node.end),
+    readListMetadata(node),
   ));
 
   if (result.length > 0) return result;
@@ -291,6 +294,58 @@ export function processNovelFootnotes(
   }
 
   return { html: applyHtmlReplacements(html, replacements), notesById };
+}
+
+/**
+ * Restores extracted footnote bodies to chapter flow immediately after the
+ * block containing their marker. This is the native-reader equivalent of the
+ * former Readium chapter materialization step; it deliberately does not depend
+ * on a React Native sheet or another interaction layer.
+ */
+export function inlineNovelFootnotesAfterBlocks(
+  blocks: readonly NovelReaderBlock[],
+  notesById: Readonly<Record<string, string>>,
+): NovelReaderBlock[] {
+  return blocks.flatMap((block) => {
+    const noteIds: string[] = [];
+    const withoutMarkers = block.html.replace(
+      /<a\b[^>]*\bdata-reader-footnote-id=(?:"([^"]+)"|'([^']+)')[^>]*>[\s\S]*?<\/a\s*>/giu,
+      (match, doubleId: string | undefined, singleId: string | undefined) => {
+        const id = doubleId ?? singleId;
+        if (!id || notesById[id] === undefined) return match;
+        if (!noteIds.includes(id)) noteIds.push(id);
+        return '';
+      },
+    );
+    if (noteIds.length === 0) return [block];
+
+    const visibleText = withoutMarkers
+      .replace(/<[^>]*>/gu, ' ')
+      .replace(/&nbsp;|&#160;/giu, ' ')
+      .replace(/\s+/gu, ' ')
+      .trim();
+    const isMarkerOnlyBlock = /^[\s:：;；,，.。·•—–-]*$/u.test(visibleText);
+    const result: NovelReaderBlock[] = isMarkerOnlyBlock ? [] : [block];
+
+    noteIds.forEach((id) => {
+      const noteHtml = notesById[id];
+      if (noteHtml === undefined) return;
+      const inlineHtml = [
+        `<aside class="nv-inline-footnote" data-footnote-id="${escapeHtmlAttribute(id)}">`,
+        '<span class="nv-inline-footnote-label">*</span>',
+        `<div class="nv-inline-footnote-content">${noteHtml}</div>`,
+        '</aside>',
+      ].join('');
+      const noteBlock = createNovelBlock(block.locator, inlineHtml);
+      result.push({
+        ...noteBlock,
+        id: `${block.id}:footnote:${id}`,
+        locator: block.locator,
+      });
+    });
+
+    return result;
+  });
 }
 
 function findFootnoteTarget(
@@ -597,7 +652,11 @@ export function mergeComicPageBatch(
   return next;
 }
 
-function createNovelBlock(locator: string, html: string): NovelReaderBlock {
+function createNovelBlock(
+  locator: string,
+  html: string,
+  metadata: Pick<NovelReaderBlock, 'listDepth' | 'listMarker'> = {},
+): NovelReaderBlock {
   const text = html
     .replace(/<[^>]*>/g, ' ')
     .replace(/&nbsp;|&#160;/gi, ' ')
@@ -609,7 +668,34 @@ function createNovelBlock(locator: string, html: string): NovelReaderBlock {
     html,
     textLength: Array.from(text).length,
     imageCount: (html.match(/<img\b/gi) ?? []).length,
+    ...metadata,
   };
+}
+
+function readListMetadata(
+  node: BlockNode,
+): Pick<NovelReaderBlock, 'listDepth' | 'listMarker'> {
+  if (node.tag !== 'li') return {};
+  let list = node.parent;
+  while (list && list.tag !== 'ol' && list.tag !== 'ul') list = list.parent;
+  if (!list) return {};
+
+  let depth = 0;
+  let ancestor: BlockNode | undefined = list;
+  while (ancestor) {
+    if (ancestor.tag === 'ol' || ancestor.tag === 'ul') depth += 1;
+    ancestor = ancestor.parent;
+  }
+  if (list.tag === 'ul') return { listDepth: depth, listMarker: '•' };
+
+  const siblings = list.children.filter((child) => child.tag === 'li');
+  const siblingIndex = Math.max(0, siblings.indexOf(node));
+  const listStart = Number.parseInt(readHtmlAttribute(list.openingTag, 'start') ?? '1', 10);
+  const itemValue = Number.parseInt(readHtmlAttribute(node.openingTag, 'value') ?? '', 10);
+  const ordinal = Number.isFinite(itemValue)
+    ? itemValue
+    : (Number.isFinite(listStart) ? listStart : 1) + siblingIndex;
+  return { listDepth: depth, listMarker: `${ordinal}.` };
 }
 
 function removeReaderMetadata(html: string): string {
@@ -630,6 +716,8 @@ interface BlockNode {
   path: string;
   start: number;
   end: number;
+  openingTag: string;
+  parent?: BlockNode;
   children: BlockNode[];
 }
 
@@ -665,6 +753,8 @@ function parseHtmlBlockNodes(source: string): BlockNode[] {
       path,
       start: match.index,
       end: match.index + token.length,
+      openingTag: token,
+      ...(parent ? { parent } : {}),
       children: [],
     };
     if (parent) parent.children.push(node);
@@ -681,7 +771,7 @@ function selectLeafBlockNodes(nodes: readonly BlockNode[], source: string): Bloc
     if (
       isStandaloneImageContainer(node, source) ||
       blockChildren.length === 0 ||
-      ['p', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'img'].includes(node.tag)
+      ['p', 'li', 'blockquote', 'center', 'figure', 'pre', 'table', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'img'].includes(node.tag)
     ) {
       if (source.slice(node.start, node.end).trim()) output.push(node);
       return;
