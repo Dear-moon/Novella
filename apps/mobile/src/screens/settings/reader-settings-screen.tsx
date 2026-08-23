@@ -128,15 +128,40 @@ export function ReaderSettingsContent() {
           title={t('reader.behavior.directionTitle')}
         />
         <NativePickerRow
-          description={t('reader.behavior.modeDescription')}
-          icon="readingMode"
-          onValueChange={(value) => void updateAppSettings({ readerViewMode: value })}
+          description={t('reader.behavior.novelModeDescription')}
+          icon="reader"
+          onValueChange={(value) => void updateAppSettings({ novelReaderViewMode: value })}
           options={[
             { label: t('reader.behavior.modeOptions.paged'), value: 'paged' },
             { label: t('reader.behavior.modeOptions.scroll'), value: 'scroll' },
           ] as const}
-          selectedValue={settings.readerViewMode}
-          title={t('reader.behavior.modeTitle')}
+          selectedValue={settings.novelReaderViewMode}
+          title={t('reader.behavior.novelModeTitle')}
+        />
+        <NativePickerRow
+          description={t('reader.behavior.comicModeDescription')}
+          icon="books"
+          onValueChange={(value) => void updateAppSettings({ comicReaderViewMode: value })}
+          options={[
+            { label: t('reader.behavior.modeOptions.paged'), value: 'paged' },
+            { label: t('reader.behavior.modeOptions.scroll'), value: 'scroll' },
+          ] as const}
+          selectedValue={settings.comicReaderViewMode}
+          title={t('reader.behavior.comicModeTitle')}
+        />
+        <NativeToggleRow
+          description={t('reader.behavior.chapterSwipeDescription')}
+          icon="progress"
+          onValueChange={(value) => void updateAppSettings({ readerChapterSwipeNavigation: value })}
+          title={t('reader.behavior.chapterSwipeTitle')}
+          value={settings.readerChapterSwipeNavigation}
+        />
+        <NativeToggleRow
+          description={t('reader.behavior.pagedTapDescription')}
+          icon="readingMode"
+          onValueChange={(value) => void updateAppSettings({ readerPagedTapNavigation: value })}
+          title={t('reader.behavior.pagedTapTitle')}
+          value={settings.readerPagedTapNavigation}
         />
         <NativeSliderRow
           description={t('reader.behavior.preloadDescription')}

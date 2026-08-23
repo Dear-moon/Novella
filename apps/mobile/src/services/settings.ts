@@ -61,6 +61,10 @@ export interface AppSettings {
   ignoreJapanese: boolean;
   ignoreLevel6: boolean;
   oledBlack: boolean;
+  novelReaderViewMode: ReaderViewMode;
+  comicReaderViewMode: ReaderViewMode;
+  readerChapterSwipeNavigation: boolean;
+  readerPagedTapNavigation: boolean;
   readerFirstLineIndent: boolean;
   readerImagePreviewOpenOnLongPress: boolean;
   readerLineHeight: number;
@@ -68,7 +72,6 @@ export interface AppSettings {
   comicPagedDirection: 'ltr' | 'rtl';
   readerPreloadWindow: number;
   readerSidePadding: number;
-  readerViewMode: ReaderViewMode;
   seedColorValue: string;
   seriesSearchMode: SeriesSearchMode;
   theme: ThemeMode;
@@ -97,8 +100,11 @@ const DEFAULT_SETTINGS: AppSettings = {
   readerParagraphSpacing: 0,
   comicPagedDirection: 'ltr',
   readerPreloadWindow: 3,
+  novelReaderViewMode: 'paged',
+  comicReaderViewMode: 'paged',
+  readerChapterSwipeNavigation: false,
+  readerPagedTapNavigation: true,
   readerSidePadding: 30,
-  readerViewMode: 'paged',
   seedColorValue: DEFAULT_THEME_SEED,
   seriesSearchMode: 'system',
   theme: 'system',
@@ -175,6 +181,29 @@ function publish(): void {
 function decodeSettings(value: unknown): AppSettings {
   if (!value || typeof value !== 'object') return DEFAULT_SETTINGS;
   const candidate = value as Record<string, unknown>;
+  const legacyReaderViewMode = isReaderViewMode(candidate.readerViewMode)
+    ? candidate.readerViewMode
+    : null;
+  const novelReaderViewMode = isReaderViewMode(candidate.novelReaderViewMode)
+    ? candidate.novelReaderViewMode
+    : legacyReaderViewMode ?? DEFAULT_SETTINGS.novelReaderViewMode;
+  const comicReaderViewMode = isReaderViewMode(candidate.comicReaderViewMode)
+    ? candidate.comicReaderViewMode
+    : legacyReaderViewMode ?? DEFAULT_SETTINGS.comicReaderViewMode;
+  const readerChapterSwipeNavigation = typeof candidate.readerChapterSwipeNavigation === 'boolean'
+    ? candidate.readerChapterSwipeNavigation
+    : typeof candidate.novelReaderChapterSwipeNavigation === 'boolean'
+      || typeof candidate.comicReaderChapterSwipeNavigation === 'boolean'
+      ? candidate.novelReaderChapterSwipeNavigation === true
+        || candidate.comicReaderChapterSwipeNavigation === true
+      : DEFAULT_SETTINGS.readerChapterSwipeNavigation;
+  const readerPagedTapNavigation = typeof candidate.readerPagedTapNavigation === 'boolean'
+    ? candidate.readerPagedTapNavigation
+    : typeof candidate.novelReaderPagedTapNavigation === 'boolean'
+      || typeof candidate.comicReaderPagedTapNavigation === 'boolean'
+      ? candidate.novelReaderPagedTapNavigation === true
+        || candidate.comicReaderPagedTapNavigation === true
+      : DEFAULT_SETTINGS.readerPagedTapNavigation;
   return {
     ...DEFAULT_SETTINGS,
     ...(typeof candidate.bookDetailCacheEnabled === 'boolean'
@@ -221,6 +250,10 @@ function decodeSettings(value: unknown): AppSettings {
     ...(typeof candidate.readerFirstLineIndent === 'boolean'
       ? { readerFirstLineIndent: candidate.readerFirstLineIndent }
       : {}),
+    novelReaderViewMode,
+    comicReaderViewMode,
+    readerChapterSwipeNavigation,
+    readerPagedTapNavigation,
     ...(typeof candidate.readerImagePreviewOpenOnLongPress === 'boolean'
       ? { readerImagePreviewOpenOnLongPress: candidate.readerImagePreviewOpenOnLongPress }
       : {}),
@@ -247,9 +280,6 @@ function decodeSettings(value: unknown): AppSettings {
     ...(typeof candidate.readerSidePadding === 'number'
       ? { readerSidePadding: clamp(candidate.readerSidePadding, 12, 64) }
       : {}),
-    ...(candidate.readerViewMode === 'paged' || candidate.readerViewMode === 'scroll'
-      ? { readerViewMode: candidate.readerViewMode }
-      : {}),
     seriesSearchMode: decodeSeriesSearchMode(candidate.seriesSearchMode),
     ...(isThemeSeed(candidate.seedColorValue)
       ? { seedColorValue: candidate.seedColorValue.toUpperCase() }
@@ -267,6 +297,10 @@ function decodeSettings(value: unknown): AppSettings {
       ? { autoCheckUpdate: candidate.autoCheckUpdate }
       : {}),
   };
+}
+
+function isReaderViewMode(value: unknown): value is ReaderViewMode {
+  return value === 'paged' || value === 'scroll';
 }
 
 function clamp(value: number, min: number, max: number): number {

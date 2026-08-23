@@ -65,6 +65,10 @@ export interface PageChapterOptions {
   pageHeight: number;
   topPadding: number;
   bottomPadding: number;
+  /** Number of pages displayed in one horizontal spread. */
+  columns?: 1 | 2;
+  /** Width reserved for each page in a multi-page spread. */
+  columnWidth?: number;
 }
 
 /**
@@ -111,8 +115,61 @@ export function pageChapter(
   }
   finishPage();
 
+  const columns = options.columns === 2 ? 2 : 1;
+  if (columns === 1) {
+    return {
+      tiles: pages,
+      totalHeight: pages.length * pageHeight,
+    };
+  }
+
+  const columnWidth = Math.max(1, options.columnWidth ?? 1);
+  const spreads: ChapterTile[] = [];
+  for (let index = 0; index < pages.length; index += columns) {
+    const first = pages[index]!;
+    const second = pages[index + 1];
+    const blocks = second
+      ? [
+          ...first.blocks,
+          ...second.blocks.map((block) => translateLayoutBlock(
+            block,
+            columnWidth,
+            first.y - second.y,
+          )),
+        ]
+      : first.blocks;
+    spreads.push({
+      id: `page-${spreads.length}`,
+      y: first.y,
+      height: pageHeight,
+      blocks,
+      contentOffsetY: Math.max(0, options.topPadding),
+    });
+  }
+
   return {
-    tiles: pages,
-    totalHeight: pages.length * pageHeight,
+    tiles: spreads,
+    totalHeight: spreads.length * pageHeight,
+  };
+}
+
+function translateLayoutBlock(
+  block: LayoutBlock,
+  offsetX: number,
+  offsetY: number,
+): LayoutBlock {
+  return {
+    ...block,
+    // Inline overlays are relative to the block origin. Move the origin once;
+    // ReaderSkiaTile adds block.x/block.y before applying ruby and inline
+    // overlay coordinates. Hit rects use document coordinates and therefore
+    // still need the spread translation below.
+    x: block.x + offsetX,
+    y: block.y + offsetY,
+    hitRects: block.hitRects.map((rect) => ({
+      ...rect,
+      x: rect.x + offsetX,
+      y: rect.y + offsetY,
+    })),
   };
 }

@@ -1,5 +1,6 @@
 import ExpoModulesCore
 import ExpoUI
+import UIKit
 
 public final class NovellaUiModule: Module {
   public func definition() -> ModuleDefinition {
@@ -18,9 +19,6 @@ public final class NovellaUiModule: Module {
     View(NovellaSearchBarView.self) {
       ViewName("SearchBar")
 
-      Prop("query") { (view: NovellaSearchBarView, query: String) in
-        view.setQuery(query)
-      }
       Prop("placeholder") { (view: NovellaSearchBarView, placeholder: String?) in
         view.setPlaceholder(placeholder)
       }
@@ -38,6 +36,9 @@ public final class NovellaUiModule: Module {
       }
       AsyncFunction("clear") { (view: NovellaSearchBarView) in
         view.clear()
+      }
+      AsyncFunction("setQuery") { (view: NovellaSearchBarView, query: String) in
+        view.setQuery(query)
       }
     }
 
@@ -72,6 +73,31 @@ public final class NovellaUiModule: Module {
       }
 
       Events("onValueChange")
+    }
+
+    View(NovellaReaderProgressBarView.self) {
+      ViewName("ReaderProgressBar")
+
+      Prop("progress") { (view: NovellaReaderProgressBarView, progress: Double) in
+        view.setProgress(progress)
+      }
+      Prop("currentPage") { (view: NovellaReaderProgressBarView, currentPage: Int) in
+        view.setCurrentPage(currentPage)
+      }
+      Prop("totalPages") { (view: NovellaReaderProgressBarView, totalPages: Int) in
+        view.setTotalPages(totalPages)
+      }
+      Prop("remainingText") { (view: NovellaReaderProgressBarView, remainingText: String) in
+        view.setRemainingText(remainingText)
+      }
+      Prop("direction") { (view: NovellaReaderProgressBarView, direction: String) in
+        view.setDirection(direction)
+      }
+      Prop("accentColor") { (view: NovellaReaderProgressBarView, accentColor: UIColor?) in
+        view.setAccentColor(accentColor)
+      }
+
+      Events("onProgressChange")
     }
   }
 }

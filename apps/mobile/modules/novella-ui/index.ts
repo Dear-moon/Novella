@@ -18,6 +18,7 @@ export {
 
 export {
   NativeSearchBar,
+  type NativeSearchBarHandle,
   type NativeSearchBarProps,
 } from './src/native-search-bar';
 
@@ -27,6 +28,11 @@ export {
   type NativeSelectionMenuItem,
   type NativeSelectionMenuProps,
 } from './src/native-selection-menu';
+
+export {
+  NativeReaderProgressBar,
+  type NativeReaderProgressBarProps,
+} from './src/native-reader-progress-bar';
 
 export {
   NativeBottomAppBar,

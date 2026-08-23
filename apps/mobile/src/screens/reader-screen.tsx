@@ -3,7 +3,6 @@ import { useRoute } from 'expo-router/react-navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Dimensions,
   FlatList,
   StyleSheet,
   View,
@@ -11,7 +10,7 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 import type { SkTypefaceFontProvider } from '@shopify/react-native-skia';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaFrame, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   findReaderBlockIndex,
   getAdjacentChapterSortNum,
@@ -46,10 +45,23 @@ import { ReaderNavigation } from '@/components/reader-navigation';
 import { ReaderSkiaTile } from '@/components/reader-skia-tile';
 import { simplifyReaderChapterTitle } from '@/services/chapter-title';
 import { createReaderChromeInsets } from '@/services/reader-chrome-layout';
+import {
+  resolveReaderBoundaryAxis,
+  resolveReaderBoundaryChapterAction,
+  resolveReaderPagedBoundaryChapterAction,
+} from '@/services/reader-boundary-gesture';
+import { shouldUseReaderDoublePage } from '@/services/reader-display-layout';
+import { resolveNovelPageProgress } from '@/services/reader-page-progress';
 import { useReaderChapter, type ReaderUserMessage } from '@/hooks/use-reader-chapter';
 import { useReaderChapterPreload } from '@/hooks/use-reader-chapter-preload';
+import {
+  useReaderChromeVisibility,
+  type ReaderPageSwipeHandler,
+  type ReaderPageTapHandler,
+} from '@/hooks/use-reader-chrome-visibility';
 import { useReaderFont } from '@/hooks/use-reader-font';
 import { useReaderImageDimensions } from '@/hooks/use-reader-image-dimensions';
+import { useReaderWindowDimensions } from '@/hooks/use-reader-window-dimensions';
 import { createFontManager } from '@/services/skia-font-loader';
 import { resolveReaderFontUrl } from '@/services/reader-font-loader';
 import { useReaderPositionSaver } from '@/hooks/use-reader-position-saver';
@@ -62,6 +74,7 @@ import {
 import {
   findVisibleReaderLayoutBlock,
   resolveReaderReflowOpenPosition,
+  resolveReaderScrollRestoreOffset,
 } from '@/services/reader-reflow-position';
 import { updateAppSettings, useAppSettings } from '@/services/settings';
 import { useReaderLifecycleSave } from '@/hooks/use-reader-lifecycle-save';
@@ -88,7 +101,7 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
   }>();
   const route = useRoute();
   const { colors } = useAppTheme();
-  const [mode, setMode] = useState<ReaderMode>(settings.readerViewMode);
+  const [mode, setMode] = useState<ReaderMode>(settings.novelReaderViewMode);
   const [pendingMode, setPendingMode] = useState<ReaderMode | null>(null);
   const pendingModeRef = useRef<ReaderMode | null>(null);
   const modeSwitchFrameRef = useRef<number | null>(null);
@@ -154,15 +167,30 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
     readerTextColor = resolvedReaderColors.textColor;
   }
 
+  // Skia layout and tiling
+  const {
+    height: screenHeight,
+    revision: viewportRevision,
+    width: screenWidth,
+  } = useReaderWindowDimensions();
+  const safeAreaFrame = useSafeAreaFrame();
+  const stableSafeArea = useMemo(
+    () => ({ bottom: insets.bottom, top: insets.top }),
+    [safeAreaFrame.height, safeAreaFrame.width, safeAreaFrame.x, safeAreaFrame.y],
+  );
+  const useDoublePage = mode === 'paged' && shouldUseReaderDoublePage(screenWidth, screenHeight);
   const readerChromeInsets = createReaderChromeInsets(
     process.env.EXPO_OS,
-    insets.top,
-    insets.bottom,
+    stableSafeArea.top,
+    stableSafeArea.bottom,
   );
-
-  // Skia layout and tiling
-  const screenWidth = Dimensions.get('window').width;
-  const screenHeight = Dimensions.get('window').height;
+  const readerViewportKey = [
+    screenWidth,
+    screenHeight,
+    readerChromeInsets.top,
+    readerChromeInsets.bottom,
+    useDoublePage,
+  ].join(':');
 
   // Slider rows update their local labels immediately, then commit settings on
   // release. Keep the expensive Skia work delayed and expose that delay as an
@@ -177,6 +205,14 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
   const requestedLayoutGeneration = `${settings.fontSize}-${settings.readerLineHeight}-${settings.readerParagraphSpacing}-${settings.readerSidePadding}-${settings.readerFirstLineIndent}`;
   const layoutGeneration = `${debouncedSettings.fontSize}-${debouncedSettings.lineHeight}-${debouncedSettings.paragraphSpacing}-${debouncedSettings.sidePadding}-${debouncedSettings.firstLineIndent}`;
   const [pendingReflowGeneration, setPendingReflowGeneration] = useState<string | null>(null);
+  const [pendingViewportReflowKey, setPendingViewportReflowKey] = useState<string | null>(null);
+  const viewportSignatureRef = useRef<{
+    chapterId: number;
+    key: string;
+    mode: ReaderMode;
+  } | null>(null);
+  const handledViewportRevisionRef = useRef(-1);
+  const viewportReflowPendingRef = useRef(false);
 
   useEffect(() => {
     if (requestedLayoutGeneration === layoutGeneration) {
@@ -216,11 +252,12 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
     if (
       pendingMode === null
       && pendingReflowGeneration === null
+      && pendingViewportReflowKey === null
       && pendingModeRef.current === null
     ) {
       reflowOverlayRef.current?.hide();
     }
-  }, [pendingMode, pendingReflowGeneration]);
+  }, [pendingMode, pendingReflowGeneration, pendingViewportReflowKey]);
 
   // Create custom FontManager when custom font is loaded
   const [fontMgr, setFontMgr] = useState<SkTypefaceFontProvider | null>(null);
@@ -281,7 +318,10 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
 
     return layoutChapter({
       blocks,
-      width: screenWidth - debouncedSettings.sidePadding * 2,
+      width: Math.max(
+        1,
+        (useDoublePage ? screenWidth / 2 : screenWidth) - debouncedSettings.sidePadding * 2,
+      ),
       theme: {
         backgroundColor: readerBackground,
         textColor: readerTextColor,
@@ -297,20 +337,34 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
       imageDimensions: imageGeometry.dimensions,
       ...(fontMgr ? { fontMgr } : {}),
     });
-  }, [blocks, screenWidth, debouncedSettings, fontLoading, content, readerFont, readerBackground, readerTextColor, readerChromeInsets, fontMgr, requiresReaderFont, fontMgrLoading, imageGeometry.dimensions]);
+  }, [blocks, screenWidth, useDoublePage, debouncedSettings, fontLoading, content, readerFont.family, readerBackground, readerTextColor, readerChromeInsets.bottom, readerChromeInsets.top, fontMgr, requiresReaderFont, fontMgrLoading, imageGeometry.dimensions]);
 
   // Native virtualization owns mounted tile/page lifetime in both modes.
   const presentation = useMemo(() => {
     if (!layout) return null;
     if (mode === 'paged') {
       return pageChapter(layout, {
+        columns: useDoublePage ? 2 : 1,
+        columnWidth: screenWidth / (useDoublePage ? 2 : 1),
         pageHeight: screenHeight,
         topPadding: readerChromeInsets.top,
         bottomPadding: readerChromeInsets.bottom,
       });
     }
     return tileChapter(layout, screenHeight * 2.5);
-  }, [layout, mode, readerChromeInsets.bottom, readerChromeInsets.top, screenHeight]);
+  }, [layout, mode, readerChromeInsets.bottom, readerChromeInsets.top, screenHeight, screenWidth, useDoublePage]);
+
+  const previousViewportSignature = viewportSignatureRef.current;
+  const viewportChangePendingBeforeCommit = Boolean(
+    viewportRevision !== handledViewportRevisionRef.current
+    && content
+    && previousViewportSignature
+    && previousViewportSignature.chapterId === content.chapter.id
+    && previousViewportSignature.mode === mode
+    && previousViewportSignature.key !== readerViewportKey
+  );
+  const viewportTransitionVisible = viewportChangePendingBeforeCommit
+    || pendingViewportReflowKey !== null;
 
   const stagePosition = useCallback(
     (position: NovelProgressInput) => stageReaderProgress({ bookId, ...position }),
@@ -331,11 +385,46 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
   const lastPositionRef = useRef<string | null>(null);
   const activeChapterIdRef = useRef<number | null>(null);
   const lastScrollOffsetRef = useRef({ x: 0, y: 0 });
+  const [visiblePageIndex, setVisiblePageIndex] = useState(0);
   activeChapterIdRef.current = content?.chapter.id ?? null;
 
   const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    lastScrollOffsetRef.current = event.nativeEvent.contentOffset;
-  }, []);
+    const offset = event.nativeEvent.contentOffset;
+    lastScrollOffsetRef.current = offset;
+    const currentBlock = findVisibleReaderLayoutBlock({
+      layout,
+      mode,
+      offset,
+      tiles: presentation?.tiles ?? [],
+      viewportWidth: screenWidth,
+    });
+    if (currentBlock) lastPositionRef.current = currentBlock.locator;
+    const nextPageIndex = resolveNovelPageProgress({
+      mode,
+      offset,
+      pagedPageCount: presentation?.tiles.length ?? 0,
+      totalHeight: layout?.totalHeight ?? 0,
+      viewportHeight: screenHeight,
+      viewportWidth: screenWidth,
+    }).current - 1;
+    setVisiblePageIndex((current) => current === nextPageIndex ? current : nextPageIndex);
+  }, [layout, mode, presentation?.tiles, screenHeight, screenWidth]);
+
+  const pageProgress = useMemo(() => resolveNovelPageProgress({
+    mode,
+    offset: lastScrollOffsetRef.current,
+    pagedPageCount: presentation?.tiles.length ?? 0,
+    totalHeight: layout?.totalHeight ?? 0,
+    viewportHeight: screenHeight,
+    viewportWidth: screenWidth,
+  }), [
+    layout?.totalHeight,
+    mode,
+    presentation?.tiles.length,
+    screenHeight,
+    screenWidth,
+    visiblePageIndex,
+  ]);
 
   const resolveCurrentVisibleBlock = useCallback(() => findVisibleReaderLayoutBlock({
     layout,
@@ -351,12 +440,88 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
     return currentBlock;
   }, [resolveCurrentVisibleBlock]);
 
+  // A real viewport/frame change invalidates paragraph/page geometry. Cover
+  // that reflow with the same overlay used for settings changes; status-bar
+  // visibility alone never changes readerViewportKey.
+  useEffect(() => {
+    const chapterId = content?.chapter.id;
+    if (!chapterId || !layout || !presentation) {
+      handledViewportRevisionRef.current = viewportRevision;
+      viewportSignatureRef.current = null;
+      viewportReflowPendingRef.current = false;
+      setPendingViewportReflowKey(null);
+      reflowOverlayRef.current?.hide();
+      return;
+    }
+
+    const nextSignature = { chapterId, key: readerViewportKey, mode };
+    const previousSignature = viewportSignatureRef.current;
+    handledViewportRevisionRef.current = viewportRevision;
+    viewportSignatureRef.current = nextSignature;
+    if (
+      !previousSignature
+      || previousSignature.chapterId !== chapterId
+      || previousSignature.mode !== mode
+      || previousSignature.key === readerViewportKey
+    ) return;
+
+    viewportReflowPendingRef.current = true;
+    reflowOverlayRef.current?.show();
+    setPendingViewportReflowKey(readerViewportKey);
+  }, [content?.chapter.id, layout, mode, presentation, readerViewportKey, viewportRevision]);
+
   const handleScrollEnd = useCallback(() => {
     if (!content || activeChapterIdRef.current !== content.chapter.id) return;
     const currentBlock = captureCurrentVisibleBlock();
     if (!currentBlock) return;
     schedulePosition({ chapterId: content.chapter.id, position: currentBlock.locator });
   }, [captureCurrentVisibleBlock, content, schedulePosition]);
+
+  const turnNovelPage = useCallback((delta: -1 | 1) => {
+    if (mode !== 'paged' || !presentation) return;
+    const currentIndex = resolveNovelPageProgress({
+      mode,
+      offset: lastScrollOffsetRef.current,
+      pagedPageCount: presentation.tiles.length,
+      totalHeight: layout?.totalHeight ?? 0,
+      viewportHeight: screenHeight,
+      viewportWidth: screenWidth,
+    }).current - 1;
+    const targetIndex = Math.min(
+      Math.max(0, currentIndex + delta),
+      Math.max(0, presentation.tiles.length - 1),
+    );
+    if (targetIndex === currentIndex) return;
+    lastScrollOffsetRef.current = { x: targetIndex * screenWidth, y: 0 };
+    setVisiblePageIndex(targetIndex);
+    flatListRef.current?.scrollToIndex({ animated: false, index: targetIndex });
+    requestAnimationFrame(handleScrollEnd);
+  }, [handleScrollEnd, layout?.totalHeight, mode, presentation, screenHeight, screenWidth]);
+
+  const jumpToProgress = useCallback((value: number) => {
+    if (!presentation || !layout) return;
+    const progress = Math.min(1, Math.max(0, Number.isFinite(value) ? value : 0));
+    if (mode === 'paged') {
+      const index = Math.round(progress * Math.max(0, presentation.tiles.length - 1));
+      lastScrollOffsetRef.current = { x: index * screenWidth, y: 0 };
+      setVisiblePageIndex(index);
+      flatListRef.current?.scrollToIndex({ animated: false, index });
+    } else {
+      const maximumOffset = Math.max(0, layout.totalHeight - screenHeight);
+      const offset = progress * maximumOffset;
+      lastScrollOffsetRef.current = { x: 0, y: offset };
+      setVisiblePageIndex(resolveNovelPageProgress({
+        mode: 'scroll',
+        offset: { x: 0, y: offset },
+        pagedPageCount: presentation.tiles.length,
+        totalHeight: layout.totalHeight,
+        viewportHeight: screenHeight,
+        viewportWidth: screenWidth,
+      }).current - 1);
+      flatListRef.current?.scrollToOffset({ animated: false, offset });
+    }
+    requestAnimationFrame(handleScrollEnd);
+  }, [handleScrollEnd, layout, mode, presentation, screenHeight, screenWidth]);
 
   const restoredPresentationRef = useRef<string | null>(null);
   const capturedReflowGenerationRef = useRef<string | null>(null);
@@ -376,15 +541,21 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
     const modeTransitionReady = pendingMode === null || pendingMode === mode;
     const reflowTransitionReady =
       pendingReflowGeneration === null || pendingReflowGeneration === layoutGeneration;
+    const viewportTransitionReady = !viewportChangePendingBeforeCommit
+      && (
+        !viewportReflowPendingRef.current
+        || pendingViewportReflowKey === readerViewportKey
+      );
     if (
       !modeTransitionReady
       || !reflowTransitionReady
+      || !viewportTransitionReady
       || !content
       || !layout
       || !presentation
       || blocks.length === 0
     ) return;
-    const restoreKey = `${content.chapter.id}:${mode}:${layoutGeneration}:${layout.totalHeight}`;
+    const restoreKey = `${content.chapter.id}:${mode}:${layoutGeneration}:${layout.totalHeight}:${readerViewportKey}`;
     if (restoredPresentationRef.current === restoreKey) return;
 
     const currentLocator = lastPositionRef.current;
@@ -412,21 +583,44 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
         );
         const safeIndex = Math.max(0, pageIndex);
         lastScrollOffsetRef.current = { x: safeIndex * screenWidth, y: 0 };
+        setVisiblePageIndex(safeIndex);
         flatListRef.current?.scrollToIndex({ animated: false, index: safeIndex });
       } else {
-        const offset = Math.max(0, targetBlock.y - 1);
+        const offset = resolveReaderScrollRestoreOffset(
+          targetBlock.y,
+          readerChromeInsets.top,
+        );
         lastScrollOffsetRef.current = { x: 0, y: offset };
+        setVisiblePageIndex(resolveNovelPageProgress({
+          mode: 'scroll',
+          offset: { x: 0, y: offset },
+          pagedPageCount: presentation.tiles.length,
+          totalHeight: layout.totalHeight,
+          viewportHeight: screenHeight,
+          viewportWidth: screenWidth,
+        }).current - 1);
         flatListRef.current?.scrollToOffset({ animated: false, offset });
       }
 
       // Keep the native spinner visible while the new list applies its jump.
       // The following frame reveals the already-positioned presentation.
-      if (pendingMode === mode || pendingReflowGeneration === layoutGeneration) {
+      const viewportReflowReady = viewportReflowPendingRef.current
+        && pendingViewportReflowKey === readerViewportKey;
+      if (
+        pendingMode === mode
+        || pendingReflowGeneration === layoutGeneration
+        || viewportReflowReady
+      ) {
         revealFrame = requestAnimationFrame(() => {
           if (pendingMode === mode) pendingModeRef.current = null;
           setPendingMode((current) => current === mode ? null : current);
           setPendingReflowGeneration((current) =>
             current === layoutGeneration ? null : current);
+          if (viewportReflowReady) {
+            viewportReflowPendingRef.current = false;
+            setPendingViewportReflowKey((current) =>
+              current === readerViewportKey ? null : current);
+          }
           reflowOverlayRef.current?.hide();
         });
       }
@@ -444,8 +638,13 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
     openPosition,
     pendingMode,
     pendingReflowGeneration,
+    pendingViewportReflowKey,
     presentation,
+    readerViewportKey,
+    screenHeight,
     screenWidth,
+    viewportChangePendingBeforeCommit,
+    viewportRevision,
   ]);
 
   const saveCurrentPosition = useCallback(async () => {
@@ -482,11 +681,113 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
     });
   }, [navigation, saveCurrentPosition]);
 
-  useEffect(() => subscribeReaderChapterSelection(route.key, (selection) => {
-    if (selection.bookId === bookId && selection.kind === 'Novel') {
-      openChapter(selection.sortNum, selection.openPosition);
+  const handleScrollEndDrag = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (mode === 'paged') return;
+    if (settings.readerChapterSwipeNavigation) {
+      const nativeEvent = event.nativeEvent;
+      const action = resolveReaderBoundaryChapterAction({
+        axis: resolveReaderBoundaryAxis(mode),
+        contentExtent: nativeEvent.contentSize.height,
+        offset: nativeEvent.contentOffset.y,
+        velocity: nativeEvent.velocity?.y ?? 0,
+        viewportExtent: nativeEvent.layoutMeasurement.height,
+      });
+      if (action === 'previous' && previousSortNum !== null) {
+        openChapter(previousSortNum, 'end');
+        return;
+      }
+      if (action === 'next' && nextSortNum !== null) {
+        openChapter(nextSortNum, 'start');
+        return;
+      }
     }
-  }), [bookId, openChapter, route.key]);
+    handleScrollEnd();
+  }, [handleScrollEnd, mode, nextSortNum, openChapter, previousSortNum, settings.readerChapterSwipeNavigation]);
+
+  const handlePageTap = useCallback<ReaderPageTapHandler>((event) => {
+    if (mode !== 'paged' || !settings.readerPagedTapNavigation || !presentation) {
+      return false;
+    }
+    const x = event.nativeEvent.pageX;
+    const direction = x <= screenWidth * 0.3
+      ? -1
+      : x >= screenWidth * 0.7
+        ? 1
+        : null;
+    if (direction === null) return false;
+
+    const currentIndex = resolveNovelPageProgress({
+      mode,
+      offset: lastScrollOffsetRef.current,
+      pagedPageCount: presentation.tiles.length,
+      totalHeight: layout?.totalHeight ?? 0,
+      viewportHeight: screenHeight,
+      viewportWidth: screenWidth,
+    }).current - 1;
+    const targetIndex = Math.min(
+      Math.max(0, currentIndex + direction),
+      Math.max(0, presentation.tiles.length - 1),
+    );
+    if (targetIndex !== currentIndex) {
+      turnNovelPage(direction);
+      return true;
+    }
+
+    if (settings.readerChapterSwipeNavigation) {
+      if (direction < 0 && previousSortNum !== null) {
+        openChapter(previousSortNum, 'end');
+      } else if (direction > 0 && nextSortNum !== null) {
+        openChapter(nextSortNum, 'start');
+      }
+    }
+    return true;
+  }, [
+    layout?.totalHeight,
+    mode,
+    nextSortNum,
+    openChapter,
+    presentation,
+    previousSortNum,
+    screenHeight,
+    screenWidth,
+    settings.readerChapterSwipeNavigation,
+    settings.readerPagedTapNavigation,
+    turnNovelPage,
+  ]);
+  const handlePageSwipe = useCallback<ReaderPageSwipeHandler>((_event, deltaX, deltaY) => {
+    if (
+      mode !== 'paged'
+      || !settings.readerChapterSwipeNavigation
+      || Math.abs(deltaX) <= Math.abs(deltaY)
+      || !presentation
+    ) return;
+    const action = resolveReaderPagedBoundaryChapterAction({
+      deltaX,
+      direction: 'ltr',
+      displayCount: presentation.tiles.length,
+      displayIndex: visiblePageIndex,
+    });
+    if (action === 'previous' && previousSortNum !== null) {
+      openChapter(previousSortNum, 'end');
+    } else if (action === 'next' && nextSortNum !== null) {
+      openChapter(nextSortNum, 'start');
+    }
+  }, [
+    mode,
+    nextSortNum,
+    openChapter,
+    presentation,
+    previousSortNum,
+    settings.readerChapterSwipeNavigation,
+    visiblePageIndex,
+  ]);
+  const {
+    hidden: chromeHidden,
+    onTouchCancel,
+    onTouchEnd,
+    onTouchMove,
+    onTouchStart,
+  } = useReaderChromeVisibility(handlePageTap, handlePageSwipe);
 
   const beginModeTransition = useCallback((nextMode: ReaderMode, persist: boolean) => {
     if (nextMode === mode || pendingModeRef.current !== null) return;
@@ -502,7 +803,7 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
         setPendingMode(nextMode);
         setMode(nextMode);
         void saveCurrentPosition();
-        if (persist) void updateAppSettings({ readerViewMode: nextMode });
+        if (persist) void updateAppSettings({ novelReaderViewMode: nextMode });
       });
     });
   }, [captureCurrentVisibleBlock, mode, saveCurrentPosition]);
@@ -512,10 +813,10 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
   }, [beginModeTransition]);
 
   useEffect(() => {
-    if (settings.readerViewMode !== mode && pendingMode === null) {
-      beginModeTransition(settings.readerViewMode, false);
+    if (settings.novelReaderViewMode !== mode && pendingMode === null) {
+      beginModeTransition(settings.novelReaderViewMode, false);
     }
-  }, [beginModeTransition, mode, pendingMode, settings.readerViewMode]);
+  }, [beginModeTransition, mode, pendingMode, settings.novelReaderViewMode]);
 
   const openChapters = useCallback(() => {
     router.push({
@@ -621,6 +922,7 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
         ) : content && presentation ? (
           <View style={styles.reader}>
             <FlatList
+              {...{ onTouchCancel, onTouchEnd, onTouchMove, onTouchStart }}
               ref={flatListRef}
               contentInsetAdjustmentBehavior="never"
               data={presentation.tiles}
@@ -633,7 +935,7 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
               maxToRenderPerBatch={4}
               onMomentumScrollEnd={handleScrollEnd}
               onScroll={handleScroll}
-              onScrollEndDrag={handleScrollEnd}
+              onScrollEndDrag={handleScrollEndDrag}
               pagingEnabled={mode === 'paged'}
               removeClippedSubviews={false}
               renderItem={renderTile}
@@ -651,12 +953,14 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
           ref={reflowOverlayRef}
           accentColor={colors.accent as string}
           backgroundColor={readerBackground}
+          forceVisible={viewportTransitionVisible}
           textColor={readerTextColor}
         />
       </View>
       <ReaderImagePreviewHost ref={imagePreviewRef} />
       <ReaderNavigation
         backgroundColor={readerBackground}
+        chromeHidden={chromeHidden}
         foregroundColor={readerTextColor}
         mode={mode}
         onModeChange={changeMode}
@@ -669,12 +973,12 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
       />
       <ReaderChapterNavigation
         backgroundColor={readerBackground}
-        bottomInset={insets.bottom}
-        current={sortNum}
-        mode={mode}
-        onNext={nextSortNum === null ? null : () => openChapter(nextSortNum, 'start')}
-        onPrevious={previousSortNum === null ? null : () => openChapter(previousSortNum, 'end')}
-        total={chapterCount}
+        chromeHidden={chromeHidden}
+        direction="ltr"
+        pageCurrent={pageProgress.current}
+        pageTotal={pageProgress.total}
+        onPageProgressChange={jumpToProgress}
+        pageProgress={pageProgress.progress}
       />
     </>
   );

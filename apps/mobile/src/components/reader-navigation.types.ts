@@ -1,6 +1,5 @@
+import type { IosProgressiveBlurAppearance } from '@/components/ios-progressive-blur-config';
 import type { ReaderMode } from '@novella/reader-engine';
-
-import type { ReaderChapterBarDirection } from '@/services/reader-chrome-layout';
 
 export interface ReaderNavigationProps {
   backgroundColor: string;
@@ -11,15 +10,18 @@ export interface ReaderNavigationProps {
   onOpenChapters: () => void;
   onOpenSettings: () => void;
   title: string;
+  chromeHidden: boolean;
+  topBarBlurAppearance?: IosProgressiveBlurAppearance;
+  topBarBlurContentReady?: boolean;
+  topBarBlurInPagedMode?: boolean;
 }
 
 export interface ReaderChapterNavigationProps {
   backgroundColor?: string;
-  bottomInset: number;
-  current: number;
-  direction?: ReaderChapterBarDirection;
-  mode: ReaderMode;
-  onNext: (() => void) | null;
-  onPrevious: (() => void) | null;
-  total: number;
+  direction?: 'ltr' | 'rtl';
+  onPageProgressChange: (progress: number) => void;
+  pageCurrent: number;
+  pageProgress: number;
+  pageTotal: number;
+  chromeHidden: boolean;
 }

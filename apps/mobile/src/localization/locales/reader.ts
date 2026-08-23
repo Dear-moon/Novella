@@ -6,10 +6,12 @@ export const zhCNReader = {
     closeImagePreview: '关闭图片预览',
     comicPage: '漫画第 {{number}} 页',
     nextChapter: '下一章',
+    nextPage: '下一页',
     openChapter: '打开第 {{number}} 章：{{title}}',
     openFootnote: '打开脚注',
     openFootnoteHint: '在底部弹窗中打开脚注',
     previousChapter: '上一章',
+    previousPage: '上一页',
     readingMode: '阅读模式',
     readerSettings: '阅读设置',
     retryComicPage: '重试加载漫画第 {{number}} 页',
@@ -65,6 +67,9 @@ export const zhCNReader = {
     paged: '分页',
     scroll: '滚动',
   },
+  progress: {
+    remainingPages: '剩余 {{count}} 页',
+  },
   states: {
     loadingComic: '正在加载漫画',
   },
@@ -82,10 +87,12 @@ export const zhTWReader: TranslationShape<typeof zhCNReader> = {
     closeImagePreview: '關閉圖片預覽',
     comicPage: '漫畫第 {{number}} 頁',
     nextChapter: '下一章',
+    nextPage: '下一頁',
     openChapter: '開啟第 {{number}} 章：{{title}}',
     openFootnote: '開啟註腳',
     openFootnoteHint: '在底部彈出視窗中開啟註腳',
     previousChapter: '上一章',
+    previousPage: '上一頁',
     readingMode: '閱讀模式',
     readerSettings: '閱讀設定',
     retryComicPage: '重新載入漫畫第 {{number}} 頁',
@@ -140,6 +147,9 @@ export const zhTWReader: TranslationShape<typeof zhCNReader> = {
   modes: {
     paged: '分頁',
     scroll: '捲動',
+  },
+  progress: {
+    remainingPages: '剩餘 {{count}} 頁',
   },
   states: {
     loadingComic: '正在載入漫畫',
