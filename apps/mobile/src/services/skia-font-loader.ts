@@ -1,10 +1,13 @@
-import { woff2Decode } from 'woff-lib/woff2/decode';
 import { Skia } from '@shopify/react-native-skia';
+
+import { readerFontFile } from '@/services/reader-font-loader';
 
 /**
  * Font conversion and registration service for Skia renderer.
  *
- * Converts WOFF2 fonts to TTF/OTF and registers them with Skia's TypefaceFontProvider.
+ * Skia's platform font manager accepts the required WOFF2 payload directly.
+ * Keeping the bytes in WOFF2 form avoids a JS Brotli/SFNT conversion and the
+ * large temporary typed arrays that conversion creates.
  */
 
 interface FontCache {
@@ -17,68 +20,31 @@ const fontCache = new Map<string, FontCache>();
 /**
  * Load and register a WOFF2 font for use in Skia Paragraph.
  *
- * Flow:
- * 1. Fetch WOFF2 from URL
- * 2. Decode WOFF2 → TTF/OTF using woff-lib
- * 3. Create Skia.Data from TTF bytes
- * 4. Create Typeface from Data
- * 5. Register with TypefaceFontProvider
- *
  * @param fontUrl - URL to the WOFF2 font file
  * @param familyName - Font family name to register (e.g., 'NovelFont')
  * @returns Typeface instance
  */
 export async function loadAndRegisterFont(
   fontUrl: string,
-  familyName: string
+  familyName: string,
 ): Promise<ReturnType<typeof Skia.Typeface.MakeFreeTypeFaceFromData> | null> {
-  console.log('[font-loader] Starting font load:', { fontUrl, familyName });
-
-  // Check cache first
   const cached = fontCache.get(fontUrl);
-  if (cached) {
-    console.log('[font-loader] Font found in cache');
-    return cached.typeface;
-  }
+  if (cached) return cached.typeface;
 
   try {
-    // 1. Fetch WOFF2
-    console.log('[font-loader] Fetching WOFF2...');
-    const response = await fetch(fontUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch font: ${response.status} ${response.statusText}`);
-    }
-
-    const woff2Buffer = await response.arrayBuffer();
-    const woff2Bytes = new Uint8Array(woff2Buffer);
-    console.log('[font-loader] WOFF2 fetched, size:', woff2Bytes.length, 'bytes');
-
-    // 2. Decode WOFF2 → TTF/OTF
-    console.log('[font-loader] Decoding WOFF2 to TTF...');
-    const ttfBytes = await woff2Decode(woff2Bytes);
-    console.log('[font-loader] TTF decoded, size:', ttfBytes.length, 'bytes');
-
-    // 3. Create Skia.Data from TTF bytes
-    console.log('[font-loader] Creating Skia.Data...');
-    const data = Skia.Data.fromBytes(ttfBytes);
-    console.log('[font-loader] Skia.Data created');
-
-    // 4. Create Typeface from Data
-    console.log('[font-loader] Creating Typeface...');
-    const typeface = Skia.Typeface.MakeFreeTypeFaceFromData(data);
+    const woff2Bytes = await readWoff2Bytes(fontUrl);
+    const typeface = createTypeface(woff2Bytes);
     if (!typeface) {
-      throw new Error('Failed to create Typeface from font data');
+      throw new Error('Skia rejected the WOFF2 font data');
     }
-    console.log('[font-loader] Typeface created successfully');
 
-    // 5. Cache the typeface
     fontCache.set(fontUrl, { typeface, familyName });
-    console.log('[font-loader] Font cached and ready');
-
     return typeface;
   } catch (error) {
-    console.error('[font-loader] Failed to load font:', error);
-    return null;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to load reader font ${familyName}: ${message}`, {
+      cause: error,
+    });
   }
 }
 
@@ -92,23 +58,24 @@ export async function loadAndRegisterFont(
 export function registerTypefaceWithProvider(
   fontProvider: any,
   typeface: any,
-  familyName: string
+  familyName: string,
 ): void {
-  console.log('[font-loader] Registering typeface with family name:', familyName);
-
   try {
     // RN Skia's TypefaceFontProvider.registerFont() method
     if (typeof fontProvider.registerFont === 'function') {
       fontProvider.registerFont(typeface, familyName);
-      console.log('[font-loader] Font registered successfully with registerFont()');
-    } else if (typeof fontProvider.registerTypeface === 'function') {
-      fontProvider.registerTypeface(typeface, familyName);
-      console.log('[font-loader] Font registered successfully with registerTypeface()');
-    } else {
-      console.error('[font-loader] No registration method found on fontProvider:', Object.keys(fontProvider));
+      return;
     }
+    if (typeof fontProvider.registerTypeface === 'function') {
+      fontProvider.registerTypeface(typeface, familyName);
+      return;
+    }
+    throw new Error('No registration method found on TypefaceFontProvider');
   } catch (error) {
-    console.error('[font-loader] Failed to register font:', error);
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to register reader font ${familyName}: ${message}`, {
+      cause: error,
+    });
   }
 }
 
@@ -120,23 +87,62 @@ export function registerTypefaceWithProvider(
  * @returns FontManager instance
  */
 export async function createFontManager(
-  customFonts: Array<{ fontUrl: string; familyName: string }> = []
-): Promise<ReturnType<typeof Skia.TypefaceFontProvider.Make>> {
-  const fontProvider = Skia.TypefaceFontProvider.Make();
+  customFonts: Array<{ fontUrl: string; familyName: string }> = [],
+): Promise<ReturnType<typeof Skia.TypefaceFontProvider.Make> | null> {
+  if (customFonts.length === 0) return null;
 
+  const fontProvider = Skia.TypefaceFontProvider.Make();
   for (const { fontUrl, familyName } of customFonts) {
     const typeface = await loadAndRegisterFont(fontUrl, familyName);
-    if (typeface) {
-      registerTypefaceWithProvider(fontProvider, typeface, familyName);
+    if (!typeface) {
+      throw new Error(`Reader font ${familyName} did not produce a Typeface`);
     }
+    registerTypefaceWithProvider(fontProvider, typeface, familyName);
   }
 
   return fontProvider;
 }
 
-/**
- * Clear font cache.
- */
+/** Clear the in-memory font cache. */
 export function clearFontCache(): void {
   fontCache.clear();
+}
+
+async function readWoff2Bytes(fontUrl: string): Promise<Uint8Array> {
+  const cachedFile = readerFontFile(fontUrl);
+  if (cachedFile) {
+    try {
+      const bytes = cachedFile.bytesSync();
+      if (isWoff2Bytes(bytes)) return bytes;
+    } catch {
+      // Retry through the network when the filesystem cache is unavailable.
+    }
+  }
+
+  const response = await fetch(fontUrl);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch font: ${response.status} ${response.statusText}`);
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (!isWoff2Bytes(bytes)) {
+    throw new Error('Font response is not a WOFF2 file');
+  }
+  return bytes;
+}
+
+function createTypeface(bytes: Uint8Array) {
+  const data = Skia.Data.fromBytes(bytes);
+  try {
+    return Skia.Typeface.MakeFreeTypeFaceFromData(data);
+  } finally {
+    data.dispose();
+  }
+}
+
+function isWoff2Bytes(bytes: Uint8Array): boolean {
+  return bytes.byteLength >= 4
+    && bytes[0] === 0x77
+    && bytes[1] === 0x4f
+    && bytes[2] === 0x46
+    && bytes[3] === 0x32;
 }

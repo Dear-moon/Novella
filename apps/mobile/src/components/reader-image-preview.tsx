@@ -52,6 +52,8 @@ export interface ReaderImagePreviewSource {
   alt?: string;
   /** Already-decoded pixels owned by the mounted Skia reader tile. */
   skiaImage?: SkImage;
+  /** Releases the preview's temporary image lease after it closes. */
+  releaseSkiaImage?: () => void;
 }
 
 export interface ReaderImagePreviewProps {
@@ -90,6 +92,7 @@ export const ReaderImagePreviewHost = forwardRef<
   const [state, setState] = useState<ReaderImagePreviewHostState>(EMPTY_PREVIEW_STATE);
   const revealFrameRef = useRef<number | null>(null);
   const cleanupFrameRef = useRef<number | null>(null);
+  const sourceRef = useRef<ReaderImagePreviewSource | null>(null);
 
   const cancelScheduledFrames = useCallback(() => {
     if (revealFrameRef.current !== null) cancelAnimationFrame(revealFrameRef.current);
@@ -98,11 +101,21 @@ export const ReaderImagePreviewHost = forwardRef<
     cleanupFrameRef.current = null;
   }, []);
 
-  useEffect(() => cancelScheduledFrames, [cancelScheduledFrames]);
+  useEffect(() => () => {
+    cancelScheduledFrames();
+    const source = sourceRef.current;
+    sourceRef.current = null;
+    source?.releaseSkiaImage?.();
+  }, [cancelScheduledFrames]);
 
   const open = useCallback((source: ReaderImagePreviewSource) => {
     cancelScheduledFrames();
+    const previousSource = sourceRef.current;
+    sourceRef.current = source;
     setState({ revealImage: false, source, visible: true });
+    if (previousSource && previousSource !== source) {
+      previousSource.releaseSkiaImage?.();
+    }
     revealFrameRef.current = requestAnimationFrame(() => {
       revealFrameRef.current = null;
       setState((current) => current.source === source
@@ -113,15 +126,19 @@ export const ReaderImagePreviewHost = forwardRef<
 
   const close = useCallback(() => {
     cancelScheduledFrames();
-    // First commit only hides the native modal. Keep the image tree intact so
-    // Skia disposal cannot delay the close-button response.
-    setState((current) => current.source
-      ? { ...current, visible: false }
-      : current);
+    // Keep the modal window alive until the current tap/press sequence has
+    // finished. Hiding it synchronously can expose the reader to the same
+    // touch-up, causing an accidental page turn or progress-slider change.
     revealFrameRef.current = requestAnimationFrame(() => {
       revealFrameRef.current = null;
+      setState((current) => current.source
+        ? { ...current, visible: false }
+        : current);
       cleanupFrameRef.current = requestAnimationFrame(() => {
         cleanupFrameRef.current = null;
+        const source = sourceRef.current;
+        sourceRef.current = null;
+        source?.releaseSkiaImage?.();
         setState((current) => current.visible ? current : EMPTY_PREVIEW_STATE);
       });
     });

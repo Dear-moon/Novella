@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import {
   Canvas,
@@ -8,12 +8,13 @@ import {
   Paragraph,
   RoundedRect,
   Skia,
-  useImage,
   vec,
   type SkImage,
   type SkParagraphBuilder,
   type SkTypefaceFontProvider,
 } from '@shopify/react-native-skia';
+
+import { ReaderSkiaImagePool } from '@/services/reader-skia-image-pool';
 import {
   addTextBlockToParagraphBuilder,
   createRenderableParagraphText,
@@ -35,6 +36,7 @@ export interface ReaderSkiaTileProps {
   theme: ReaderTheme;
   fontMgr?: SkTypefaceFontProvider | null;
   generation: string;
+  imagePool: ReaderSkiaImagePool;
   imageAccessibilityLabel: string;
   onOpenImage?: (source: ReaderImagePreviewSource) => void;
   openImageOnLongPress?: boolean;
@@ -42,14 +44,16 @@ export interface ReaderSkiaTileProps {
 }
 
 /**
- * A mounted native-list cell owns every Paragraph and SkImage it renders.
- * Chapter layout and tile/page plans retain pure data only.
+ * A mounted native-list cell owns every Paragraph it renders and leases image
+ * pixels from the chapter-local pool. Chapter layout and tile/page plans retain
+ * pure data only.
  */
 export function ReaderSkiaTile({
   tile,
   theme,
   fontMgr,
   generation,
+  imagePool,
   imageAccessibilityLabel,
   onOpenImage,
   openImageOnLongPress = false,
@@ -57,12 +61,27 @@ export function ReaderSkiaTile({
 }: ReaderSkiaTileProps) {
   const sidePadding = theme.sidePadding;
   const contentOffsetY = tile.contentOffsetY ?? 0;
+  const tileMountedRef = useRef(true);
+  const loadedImagesRef = useRef<Record<string, SkImage>>({});
   const [loadedImages, setLoadedImages] = useState<Readonly<Record<string, SkImage>>>({});
   const rememberLoadedImage = useCallback((blockId: string, image: SkImage) => {
-    setLoadedImages((current) => current[blockId] === image
-      ? current
-      : { ...current, [blockId]: image });
+    const current = loadedImagesRef.current;
+    if (current[blockId] === image) return;
+    const next = { ...current, [blockId]: image };
+    loadedImagesRef.current = next;
+    if (tileMountedRef.current) setLoadedImages(next);
   }, []);
+  const releaseLoadedImage = useCallback((blockId: string, image: SkImage) => {
+    if (loadedImagesRef.current[blockId] !== image) return;
+    const next = { ...loadedImagesRef.current };
+    delete next[blockId];
+    loadedImagesRef.current = next;
+    if (tileMountedRef.current) setLoadedImages(next);
+  }, []);
+  const retainLoadedImage = useCallback((blockId: string, image: SkImage) => {
+    if (loadedImagesRef.current[blockId] !== image) return undefined;
+    return imagePool.retain(image);
+  }, [imagePool]);
   const paragraphs = useMemo(() => {
     const builders = new Map<string, SkParagraphBuilder>();
     const buildParagraph = (
@@ -162,6 +181,16 @@ export function ReaderSkiaTile({
       }, ...rubyParagraphs, ...inlineTextParagraphs];
     });
   }, [contentOffsetY, fontMgr, generation, sidePadding, tile]);
+
+  useEffect(() => () => {
+    for (const item of paragraphs) item.paragraph.dispose();
+  }, [paragraphs]);
+
+  useEffect(() => () => {
+    tileMountedRef.current = false;
+    loadedImagesRef.current = {};
+  }, []);
+
   const imageBlocks = tile.blocks.flatMap((block) => {
     const blockX = sidePadding + block.x;
     const blockY = contentOffsetY + block.y - tile.y;
@@ -200,7 +229,9 @@ export function ReaderSkiaTile({
               key={item.blockId}
               blockId={item.blockId}
               imageLayout={item.image}
+              imagePool={imagePool}
               onImageReady={rememberLoadedImage}
+              onImageReleased={releaseLoadedImage}
               x={item.x}
               y={item.y}
             />
@@ -225,11 +256,17 @@ export function ReaderSkiaTile({
 
       {onOpenImage ? imageBlocks.filter((item) => item.image.previewable).map((item) => {
         const warmImage = loadedImages[item.blockId];
-        const open = () => onOpenImage({
-          uri: item.image.url,
-          ...(item.image.alt ? { alt: item.image.alt } : {}),
-          ...(warmImage ? { skiaImage: warmImage } : {}),
-        });
+        const open = () => {
+          const releaseSkiaImage = warmImage
+            ? retainLoadedImage(item.blockId, warmImage)
+            : undefined;
+          onOpenImage({
+            uri: item.image.url,
+            ...(item.image.alt ? { alt: item.image.alt } : {}),
+            ...(warmImage ? { skiaImage: warmImage } : {}),
+            ...(releaseSkiaImage ? { releaseSkiaImage } : {}),
+          });
+        };
         return (
           <Pressable
             key={`hit:${item.blockId}`}
@@ -237,6 +274,10 @@ export function ReaderSkiaTile({
             accessibilityRole="imagebutton"
             onLongPress={openImageOnLongPress ? open : undefined}
             onPress={openImageOnLongPress ? undefined : open}
+            onTouchCancel={(event) => event.stopPropagation()}
+            onTouchEnd={(event) => event.stopPropagation()}
+            onTouchMove={(event) => event.stopPropagation()}
+            onTouchStart={(event) => event.stopPropagation()}
             style={({ pressed }) => [{
               height: item.image.height,
               left: item.x,
@@ -251,32 +292,76 @@ export function ReaderSkiaTile({
   );
 }
 
-interface ReaderSkiaImageProps {
+export interface ReaderSkiaImageProps {
   blockId: string;
   imageLayout: ImageLayout;
-  onImageReady: (blockId: string, image: SkImage) => void;
+  imagePool: ReaderSkiaImagePool;
+  estimatedBytes?: number;
+  maxPixelSize?: number;
+  onImageReady?: (blockId: string, image: SkImage) => void;
+  onImageReleased?: (blockId: string, image: SkImage) => void;
+  rememberNaturalDimensions?: boolean;
   x: number;
   y: number;
 }
 
-function ReaderSkiaImage({ blockId, imageLayout, onImageReady, x, y }: ReaderSkiaImageProps) {
+export function ReaderSkiaImage({
+  blockId,
+  imageLayout,
+  imagePool,
+  estimatedBytes,
+  maxPixelSize,
+  onImageReady,
+  onImageReleased,
+  rememberNaturalDimensions = true,
+  x,
+  y,
+}: ReaderSkiaImageProps) {
   const uri = resolveReaderImageUrl(imageLayout.url);
   const [failed, setFailed] = useState(false);
-  const handleError = useCallback(() => setFailed(true), []);
-  const image = useImage(uri || null, handleError);
+  const [image, setImage] = useState<SkImage | null>(null);
+  const loadedImageRef = useRef<SkImage | null>(null);
+  const handleError = useCallback((_error: Error) => {
+    loadedImageRef.current = null;
+    setImage(null);
+    setFailed(true);
+  }, []);
 
   useEffect(() => {
     setFailed(false);
-  }, [uri]);
+    setImage(null);
+    loadedImageRef.current = null;
+    if (!uri) return undefined;
 
-  useEffect(() => {
-    if (!image || !uri) return;
-    onImageReady(blockId, image);
-    rememberReaderImageDimensions(uri, {
-      width: image.width(),
-      height: image.height(),
-    });
-  }, [blockId, image, onImageReady, uri]);
+    const release = imagePool.acquire(uri, (nextImage) => {
+      loadedImageRef.current = nextImage;
+      setImage(nextImage);
+      onImageReady?.(blockId, nextImage);
+      if (rememberNaturalDimensions) {
+        rememberReaderImageDimensions(uri, {
+          width: nextImage.width(),
+          height: nextImage.height(),
+        });
+      }
+    }, handleError, maxPixelSize, estimatedBytes);
+
+    return () => {
+      release();
+      const loadedImage = loadedImageRef.current;
+      loadedImageRef.current = null;
+      if (loadedImage) onImageReleased?.(blockId, loadedImage);
+    };
+  }, [
+    blockId,
+    handleError,
+    estimatedBytes,
+    imagePool,
+    maxPixelSize,
+    onImageReady,
+    onImageReleased,
+    rememberNaturalDimensions,
+    uri,
+  ]);
 
   const clip = {
     rect: { x, y, width: imageLayout.width, height: imageLayout.height },

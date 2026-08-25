@@ -2,8 +2,10 @@ import { router, useNavigation } from 'expo-router';
 import { useRoute } from 'expo-router/react-navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useAnimatedRef } from 'react-native-reanimated';
 import {
   FlatList,
+  ScrollView,
   StyleSheet,
   View,
   type NativeScrollEvent,
@@ -24,7 +26,6 @@ import {
 import {
   layoutChapter,
   pageChapter,
-  tileChapter,
   type ChapterTile,
 } from '@novella/reader-layout';
 import { useBookDetailRouteTheme } from '@/components/book-detail-theme-provider';
@@ -41,6 +42,7 @@ import {
   type ReaderImagePreviewSource,
 } from '@/components/reader-image-preview';
 import { ReaderNavigation } from '@/components/reader-navigation';
+import { ReaderSkiaScroll } from '@/components/reader-skia-scroll';
 import { ReaderSkiaTile } from '@/components/reader-skia-tile';
 import { simplifyReaderChapterTitle } from '@/services/chapter-title';
 import { createReaderChromeInsets } from '@/services/reader-chrome-layout';
@@ -63,6 +65,7 @@ import { useReaderImageDimensions } from '@/hooks/use-reader-image-dimensions';
 import { useReaderWindowDimensions } from '@/hooks/use-reader-window-dimensions';
 import { createFontManager } from '@/services/skia-font-loader';
 import { resolveReaderFontUrl } from '@/services/reader-font-loader';
+import { ReaderSkiaImagePool } from '@/services/reader-skia-image-pool';
 import { useReaderPositionSaver } from '@/hooks/use-reader-position-saver';
 import { subscribeReaderChapterSelection } from '@/services/reader-chapter-selection';
 import {
@@ -135,19 +138,20 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
     () => (content ? processNovelFootnotes(chapterHtml) : { html: chapterHtml, notesById: {} }),
     [content, chapterHtml],
   );
-  const sourceBlocks = useMemo(
-    () => (content ? normalizeNovelBlocks(footnotes.html, undefined, { sanitize: false }) : []),
-    [content, footnotes.html],
-  );
-  const blocks = useMemo(
-    () => inlineNovelFootnotesAfterBlocks(sourceBlocks, footnotes.notesById),
-    [footnotes.notesById, sourceBlocks],
-  );
-  const imageDimensionHtml = useMemo(
-    () => blocks.map((block) => block.html).join('\n'),
+  const blocks = useMemo(() => {
+    if (!content) return [];
+    const sourceBlocks = normalizeNovelBlocks(
+      footnotes.html,
+      undefined,
+      { sanitize: false },
+    );
+    return inlineNovelFootnotesAfterBlocks(sourceBlocks, footnotes.notesById);
+  }, [content, footnotes.html, footnotes.notesById]);
+  const imageHtmlBlocks = useMemo(
+    () => blocks.map((block) => block.html),
     [blocks],
   );
-  const imageGeometry = useReaderImageDimensions(imageDimensionHtml);
+  const imageGeometry = useReaderImageDimensions(imageHtmlBlocks);
 
   // Calculate colors and insets before layout
   const colorScheme = useAppColorScheme();
@@ -176,6 +180,9 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
     readerBackground = resolvedReaderColors.backgroundColor;
     readerTextColor = resolvedReaderColors.textColor;
   }
+  const readerStatusBarStyle = process.env.EXPO_OS === 'ios'
+    ? readerTextColor === '#FFFFFF' ? 'light-content' : 'dark-content'
+    : isDarkReader ? 'light-content' : 'dark-content';
 
   // Skia layout and tiling
   const {
@@ -279,7 +286,6 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
 
   useEffect(() => {
     if (!requiresReaderFont || readerFont.status !== 'loaded' || !content?.chapter.fontUrl) {
-      if (__DEV__) console.log('[reader-screen] Using system font');
       setFontMgr(null);
       setFontMgrLoading(false);
       setFontMgrError(null);
@@ -288,13 +294,11 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
 
     const resolvedFontUrl = resolveReaderFontUrl(content.chapter.fontUrl);
     if (!resolvedFontUrl) {
-      if (__DEV__) console.error('[reader-screen] Failed to resolve font URL');
       setFontMgrError('Failed to resolve font URL');
       setFontMgrLoading(false);
       return;
     }
 
-    if (__DEV__) console.log(`[reader-screen] Loading font: ${readerFont.family}`);
     setFontMgrLoading(true);
     setFontMgrError(null);
 
@@ -306,12 +310,10 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
       }
     ])
       .then((mgr) => {
-        if (__DEV__) console.log('[reader-screen] Font loaded');
         setFontMgr(mgr);
         setFontMgrLoading(false);
       })
       .catch((error) => {
-        console.error('[reader-screen] Failed to create font manager:', error);
         setFontMgrError(error?.message || 'Failed to create font manager');
         setFontMgr(null);
         setFontMgrLoading(false);
@@ -357,7 +359,8 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
     });
   }, [blocks, mode, screenHeight, screenWidth, useDoublePage, debouncedSettings, fontLoading, content, readerFont.family, readerBackground, readerTextColor, readerChromeInsets.bottom, readerChromeInsets.top, fontMgr, requiresReaderFont, fontMgrLoading, imageGeometry.dimensions]);
 
-  // Native virtualization owns mounted tile/page lifetime in both modes.
+  // Paged mode uses native list virtualization; scroll mode keeps one
+  // persistent Canvas and virtualizes only nearby paragraph/image data.
   const presentation = useMemo(() => {
     if (!layout) return null;
     if (mode === 'paged') {
@@ -369,8 +372,13 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
         bottomPadding: readerChromeInsets.bottom,
       });
     }
-    return tileChapter(layout, screenHeight * 2.5);
+    return { tiles: [], totalHeight: layout.totalHeight };
   }, [layout, mode, readerChromeInsets.bottom, readerChromeInsets.top, screenHeight, screenWidth, useDoublePage]);
+  const imagePool = useMemo(
+    () => new ReaderSkiaImagePool(),
+    [content?.chapter.id],
+  );
+  useEffect(() => () => imagePool.dispose(), [imagePool]);
 
   const previousViewportSignature = viewportSignatureRef.current;
   const viewportChangePendingBeforeCommit = Boolean(
@@ -398,10 +406,12 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
     stagePosition,
   );
 
-  // Scroll position management stays on native FlatList events; it never drives rendering.
-  // A chapter change leaves the old list mounted for one render, so its transient
-  // initial scroll callback must not overwrite an explicit start/end boundary.
+  // Scroll mode reports only viewport-bucket changes to JS; drag/momentum end
+  // events still provide the exact native offset. A chapter change leaves the
+  // old presentation mounted for one render, so its transient initial callback
+  // must not overwrite an explicit start/end boundary.
   const flatListRef = useRef<FlatList<ChapterTile>>(null);
+  const scrollViewRef = useAnimatedRef<ScrollView>();
   const lastPositionRef = useRef<{ chapterId: number; locator: string } | null>(null);
   const positionCaptureReadyRef = useRef(false);
   const readerChapterKey = `${bookId}:${sortNum}:${conversion ?? 'none'}:${openPosition}`;
@@ -414,16 +424,16 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
   const activeChapterIdRef = useRef<number | null>(null);
   const lastScrollOffsetRef = useRef({ x: 0, y: 0 });
   const [visiblePageIndex, setVisiblePageIndex] = useState(0);
+  const [scrollProgressRevision, setScrollProgressRevision] = useState(0);
   activeChapterIdRef.current = content?.chapter.id ?? null;
 
-  const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+  const updateScrollPosition = useCallback((offset: { x: number; y: number }) => {
+    lastScrollOffsetRef.current = offset;
     if (
       !content
       || !positionCaptureReadyRef.current
       || positionCaptureKeyRef.current !== readerChapterKey
     ) return;
-    const offset = event.nativeEvent.contentOffset;
-    lastScrollOffsetRef.current = offset;
     const currentBlock = findVisibleReaderLayoutBlock({
       layout,
       mode,
@@ -448,6 +458,13 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
     setVisiblePageIndex((current) => current === nextPageIndex ? current : nextPageIndex);
   }, [content, layout, mode, presentation?.tiles, readerChapterKey, screenHeight, screenWidth]);
 
+  const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    updateScrollPosition(event.nativeEvent.contentOffset);
+  }, [updateScrollPosition]);
+  const handleViewportChanged = useCallback((y: number) => {
+    updateScrollPosition({ x: 0, y });
+  }, [updateScrollPosition]);
+
   const pageProgress = useMemo(() => resolveNovelPageProgress({
     mode,
     offset: lastScrollOffsetRef.current,
@@ -461,6 +478,7 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
     presentation?.tiles.length,
     screenHeight,
     screenWidth,
+    scrollProgressRevision,
     visiblePageIndex,
   ]);
 
@@ -519,13 +537,16 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
     setPendingViewportReflowKey(readerViewportKey);
   }, [content?.chapter.id, layout, mode, presentation, readerViewportKey, viewportRevision]);
 
-  const handleScrollEnd = useCallback(() => {
+  const handleScrollEnd = useCallback((event?: NativeSyntheticEvent<NativeScrollEvent>) => {
     if (!content || activeChapterIdRef.current !== content.chapter.id) return;
+    if (event) {
+      lastScrollOffsetRef.current = event.nativeEvent.contentOffset;
+      setScrollProgressRevision((current) => current + 1);
+    }
     const currentBlock = captureCurrentVisibleBlock();
     if (!currentBlock) return;
     schedulePosition({ chapterId: content.chapter.id, position: currentBlock.locator });
   }, [captureCurrentVisibleBlock, content, schedulePosition]);
-
   const turnNovelPage = useCallback((delta: -1 | 1) => {
     if (mode !== 'paged' || !presentation) return;
     const currentIndex = resolveNovelPageProgress({
@@ -544,7 +565,7 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
     lastScrollOffsetRef.current = { x: targetIndex * screenWidth, y: 0 };
     setVisiblePageIndex(targetIndex);
     flatListRef.current?.scrollToIndex({ animated: false, index: targetIndex });
-    requestAnimationFrame(handleScrollEnd);
+    requestAnimationFrame(() => handleScrollEnd());
   }, [handleScrollEnd, layout?.totalHeight, mode, presentation, screenHeight, screenWidth]);
 
   const jumpToProgress = useCallback((value: number) => {
@@ -567,9 +588,9 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
         viewportHeight: screenHeight,
         viewportWidth: screenWidth,
       }).current - 1);
-      flatListRef.current?.scrollToOffset({ animated: false, offset });
+      scrollViewRef.current?.scrollTo({ animated: false, x: 0, y: offset });
     }
-    requestAnimationFrame(handleScrollEnd);
+    requestAnimationFrame(() => handleScrollEnd());
   }, [handleScrollEnd, layout, mode, presentation, screenHeight, screenWidth]);
 
   const restoredPresentationRef = useRef<string | null>(null);
@@ -658,7 +679,7 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
           viewportHeight: screenHeight,
           viewportWidth: screenWidth,
         }).current - 1);
-        flatListRef.current?.scrollToOffset({ animated: false, offset });
+        scrollViewRef.current?.scrollTo({ animated: false, x: 0, y: offset });
       }
 
       // Keep the native spinner visible while the new list applies its jump.
@@ -771,7 +792,7 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
       openChapter(nextSortNum, 'start');
       return;
     }
-    handleScrollEnd();
+    handleScrollEnd(event);
   }, [handleScrollEnd, mode, nextSortNum, openChapter, previousSortNum]);
 
   const handlePageTap = useCallback<ReaderPageTapHandler>((event) => {
@@ -860,19 +881,25 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
     positionCaptureReadyRef.current = false;
     restoredPresentationRef.current = null;
     pendingModeRef.current = nextMode;
-    // This host owns its state, so showing it does not reconcile ReaderScreen
-    // or touch mounted Skia tiles. Two frames let that native view paint first.
+    // First remove the old Skia list behind the reflow overlay. The mode state
+    // changes on a later frame, after the old Canvas surfaces have unmounted,
+    // so Metal never has to allocate old and new chapter drawables together.
     reflowOverlayRef.current?.show();
     modeSwitchFrameRef.current = requestAnimationFrame(() => {
       modeSwitchFrameRef.current = requestAnimationFrame(() => {
         modeSwitchFrameRef.current = null;
         setPendingMode(nextMode);
-        setMode(nextMode);
         void saveCurrentPosition();
         if (persist) void updateAppSettings({ novelReaderViewMode: nextMode });
       });
     });
   }, [captureCurrentVisibleBlock, mode, saveCurrentPosition]);
+
+  useEffect(() => {
+    if (pendingMode === null || pendingMode === mode) return;
+    const frame = requestAnimationFrame(() => setMode(pendingMode));
+    return () => cancelAnimationFrame(frame);
+  }, [mode, pendingMode]);
 
   const changeMode = useCallback((nextMode: ReaderMode) => {
     beginModeTransition(nextMode, true);
@@ -914,13 +941,16 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
         sidePadding: debouncedSettings.sidePadding,
         firstLineIndent: debouncedSettings.firstLineIndent,
       }}
+      imagePool={imagePool}
       tile={tile}
       viewportWidth={screenWidth}
     />
   ), [
     debouncedSettings,
     fontMgr,
+    imagePool,
     layoutGeneration,
+    mode,
     openImagePreview,
     readerBackground,
     readerChromeInsets,
@@ -985,33 +1015,67 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
             accentColor={colors.accent as string}
             textColor={readerTextColor}
           />
-        ) : content && presentation ? (
+        ) : content && presentation && (pendingMode === null || pendingMode === mode) ? (
           <View style={styles.reader}>
-            <FlatList
-              {...{ onTouchCancel, onTouchEnd, onTouchMove, onTouchStart }}
-              ref={flatListRef}
-              contentInsetAdjustmentBehavior="never"
-              data={presentation.tiles}
-              decelerationRate={mode === 'paged' ? 'fast' : 'normal'}
-              getItemLayout={getItemLayout}
-              horizontal={mode === 'paged'}
-              initialNumToRender={3}
-              key={`${content.chapter.id}:${mode}`}
-              keyExtractor={getTileKey}
-              maxToRenderPerBatch={4}
-              onMomentumScrollEnd={handleScrollEnd}
-              onScroll={handleScroll}
-              onScrollEndDrag={handleScrollEndDrag}
-              pagingEnabled={mode === 'paged'}
-              removeClippedSubviews={false}
-              renderItem={renderTile}
-              scrollEventThrottle={250}
-              showsHorizontalScrollIndicator={false}
-              showsVerticalScrollIndicator={mode !== 'paged'}
-              style={styles.reader}
-              updateCellsBatchingPeriod={0}
-              windowSize={5}
-            />
+            {mode === 'paged' ? (
+              <FlatList
+                {...{ onTouchCancel, onTouchEnd, onTouchMove, onTouchStart }}
+                ref={flatListRef}
+                contentInsetAdjustmentBehavior="never"
+                data={presentation.tiles}
+                decelerationRate="fast"
+                getItemLayout={getItemLayout}
+                horizontal
+                initialNumToRender={3}
+                key={`${content.chapter.id}:paged`}
+                keyExtractor={getTileKey}
+                maxToRenderPerBatch={4}
+                onMomentumScrollEnd={handleScrollEnd}
+                onScroll={handleScroll}
+                onScrollEndDrag={handleScrollEndDrag}
+                pagingEnabled
+                removeClippedSubviews={false}
+                renderItem={renderTile}
+                scrollEventThrottle={250}
+                showsHorizontalScrollIndicator={false}
+                showsVerticalScrollIndicator={false}
+                style={styles.reader}
+                updateCellsBatchingPeriod={0}
+                windowSize={5}
+              />
+            ) : (
+              <ReaderSkiaScroll
+                key={`scroll:${content.chapter.id}:${layoutGeneration}:${readerViewportKey}`}
+                fontMgr={fontMgr}
+                generation={layoutGeneration}
+                imageAccessibilityLabel={t('images.illustration')}
+                imagePool={imagePool}
+                layout={layout!}
+                onMomentumScrollEnd={handleScrollEnd}
+                onOpenImage={openImagePreview}
+                onViewportChanged={handleViewportChanged}
+                onScrollEndDrag={handleScrollEndDrag}
+                onTouchCancel={onTouchCancel}
+                onTouchEnd={onTouchEnd}
+                onTouchMove={onTouchMove}
+                onTouchStart={onTouchStart}
+                openImageOnLongPress={settings.readerImagePreviewOpenOnLongPress}
+                scrollViewRef={scrollViewRef}
+                theme={{
+                  backgroundColor: readerBackground,
+                  textColor: readerTextColor,
+                  fontSize: debouncedSettings.fontSize,
+                  lineHeight: debouncedSettings.lineHeight,
+                  paragraphSpacing: debouncedSettings.paragraphSpacing,
+                  topPadding: readerChromeInsets.top,
+                  bottomPadding: readerChromeInsets.bottom,
+                  sidePadding: debouncedSettings.sidePadding,
+                  firstLineIndent: debouncedSettings.firstLineIndent,
+                }}
+                viewportHeight={screenHeight}
+                viewportWidth={screenWidth}
+              />
+            )}
           </View>
         ) : null}
         <ReaderReflowOverlayHost
@@ -1027,13 +1091,12 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
         backgroundColor={readerBackground}
         chromeHidden={chromeHidden}
         foregroundColor={readerTextColor}
-        mode={mode}
-        onModeChange={changeMode}
         onOpenChapters={openChapters}
         onOpenSettings={() => router.push({
           pathname: '/reader/[bookId]/settings',
           params: { bookId: String(bookId), readerKey: route.key, sortNum: String(sortNum), type: 'Novel' },
         })}
+        statusBarStyle={readerStatusBarStyle}
         title={readerTitle || t('titles.reader')}
       />
       <ReaderChapterNavigation

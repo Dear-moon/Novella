@@ -1,15 +1,12 @@
 import { Stack } from 'expo-router';
 import {
   IconBook,
-  IconLayoutList,
-  IconLayoutRows,
   IconSettings,
 } from '@tabler/icons-react-native';
 import { useTranslation } from 'react-i18next';
 import { Pressable, StatusBar, StyleSheet, View } from 'react-native';
 
 import type { ReaderNavigationProps } from '@/components/reader-navigation.types';
-import { useOptimisticReaderMode } from '@/hooks/use-optimistic-reader-mode';
 
 export function ReaderNavigation(props: ReaderNavigationProps) {
   return (
@@ -25,29 +22,27 @@ export function ReaderNavigation(props: ReaderNavigationProps) {
           gestureEnabled: false,
           headerStyle: { backgroundColor: props.backgroundColor },
           headerTintColor: props.foregroundColor,
+          headerTitleStyle: { color: props.foregroundColor },
           headerTransparent: true,
           title: props.title,
         }}
       />
-      <StatusBar animated hidden={props.chromeHidden} showHideTransition="fade" />
+      <StatusBar
+        animated
+        barStyle={props.statusBarStyle}
+        hidden={props.chromeHidden}
+        showHideTransition="fade"
+      />
     </>
   );
 }
 
 function ReaderHeaderActions({
   foregroundColor,
-  mode,
-  onModeChange,
   onOpenChapters,
   onOpenSettings,
 }: ReaderNavigationProps) {
   const { t } = useTranslation('reader');
-  const {
-    displayMode,
-    nextMode,
-    requestModeChange,
-  } = useOptimisticReaderMode(mode, onModeChange);
-  const ModeIcon = displayMode === 'scroll' ? IconLayoutRows : IconLayoutList;
   return (
     <View style={styles.actions}>
       <HeaderAction
@@ -55,14 +50,6 @@ function ReaderHeaderActions({
         color={foregroundColor}
         icon={IconBook}
         onPress={onOpenChapters}
-      />
-      <HeaderAction
-        accessibilityLabel={t('accessibility.switchMode', {
-          mode: t(`modes.${nextMode}`),
-        })}
-        color={foregroundColor}
-        icon={ModeIcon}
-        onPress={requestModeChange}
       />
       <HeaderAction
         accessibilityLabel={t('accessibility.readerSettings')}
