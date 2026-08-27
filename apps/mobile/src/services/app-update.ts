@@ -1,7 +1,10 @@
-const LATEST_RELEASE_URL =
-  'https://api.github.com/repos/celia-sh/Novella/releases/latest';
+// The app is only shipped from the maintainer's fork (Dear-moon). GitHub's
+// `/releases/latest` never returns pre-releases, so we list the newest release
+// (including pre-releases) to match the fork's release workflow.
+const RELEASES_API_URL =
+  'https://api.github.com/repos/Dear-moon/Novella/releases?per_page=1';
 
-const RELEASE_URL_PREFIX = '/celia-sh/Novella/releases/';
+const RELEASE_URL_PREFIX = '/Dear-moon/Novella/releases/';
 const VERSION_PATTERN =
   /^[vV]?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 
@@ -37,7 +40,7 @@ export async function checkForAppUpdate(
 ): Promise<AppUpdateCheckResult> {
   const normalizedCurrentVersion = normalizeVersion(currentVersion);
   const fetchImpl = options.fetchImpl ?? fetch;
-  const response = await fetchImpl(LATEST_RELEASE_URL, {
+  const response = await fetchImpl(RELEASES_API_URL, {
     headers: {
       Accept: 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28',
@@ -46,7 +49,12 @@ export async function checkForAppUpdate(
   });
   if (!response.ok) throw new Error(`GitHub release HTTP ${response.status}.`);
 
-  const release = decodeLatestRelease(await response.json());
+  const payload = await response.json();
+  if (!Array.isArray(payload) || payload.length === 0) {
+    throw new Error('Invalid GitHub release response.');
+  }
+
+  const release = decodeLatestRelease(payload[0]);
   const normalizedLatestVersion = normalizeVersion(release.version);
   if (compareAppVersions(normalizedCurrentVersion, normalizedLatestVersion) >= 0) {
     return {
