@@ -9,6 +9,7 @@ on:
     paths:
       - 'lib/**'
       - 'rust/**'
+      - 'windows/**'
       - 'pubspec.yaml'
       - '.github/workflows/build_windows.yml'
 
