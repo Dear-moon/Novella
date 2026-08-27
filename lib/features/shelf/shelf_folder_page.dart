@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_reorderable_grid_view/widgets/widgets.dart';
 import 'package:logging/logging.dart';
-import 'package:novella/core/layout/app_window_class.dart';
 import 'package:novella/core/network/request_queue.dart';
 import 'package:novella/core/navigation/app_route_launcher.dart';
 import 'package:novella/core/widgets/m3e_loading_indicator.dart';
@@ -738,7 +737,7 @@ class _ShelfFolderPageState extends ConsumerState<ShelfFolderPage> {
                     sliver: SliverLayoutBuilder(
                       builder: (context, constraints) {
                         return SliverGrid(
-                          gridDelegate: appBookGridDelegateForWidth(
+                          gridDelegate: shelfGridDelegateForWidth(
                             constraints.crossAxisExtent,
                           ),
                           delegate: SliverChildBuilderDelegate((
@@ -818,7 +817,7 @@ class _ShelfFolderPageState extends ConsumerState<ShelfFolderPage> {
                         12,
                         12 + MediaQuery.paddingOf(context).bottom,
                       ),
-                      gridDelegate: appBookGridDelegateForWidth(
+                      gridDelegate: shelfGridDelegateForWidth(
                         constraints.maxWidth - 24,
                       ),
                       itemCount: displayItems.length,

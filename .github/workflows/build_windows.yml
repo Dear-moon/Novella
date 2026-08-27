@@ -1,0 +1,49 @@
+name: Build Windows Desktop
+
+# 云端构建 Windows 桌面版（v1.x Flutter + flutter_rust_bridge）。
+# 本机无 Flutter SDK，用 CI 验证书架/详情等 UI 迁移的编译。
+on:
+  workflow_dispatch:
+  push:
+    branches: [v1.x]
+    paths:
+      - 'lib/**'
+      - 'rust/**'
+      - 'pubspec.yaml'
+      - '.github/workflows/build_windows.yml'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.6'
+          cache: true
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Build Rust lib (Windows)
+        working-directory: rust
+        run: cargo build --release
+
+      - name: Build Flutter Windows
+        run: flutter build windows --release
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v6
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          name: novella-windows
+          path: build/windows/x64/runner/Release

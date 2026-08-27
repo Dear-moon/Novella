@@ -703,12 +703,14 @@ class ShelfPageState extends ConsumerState<ShelfPage> {
   }
 
   void _toggleSortMode() {
-    if (_hasSelection || _selectedFilter != 0) {
+    if (_selectedFilter != 0) {
       return;
     }
 
     setState(() {
       _isSortMode = !_isSortMode;
+      _selectedBookIds.clear();
+      _selectedFolderIds.clear();
       _dragStartIndex = null;
       _dragTargetIndex = null;
       _isSortDragging = false;
@@ -763,65 +765,48 @@ class ShelfPageState extends ConsumerState<ShelfPage> {
         .toList(growable: false);
   }
 
-  Future<void> _handleEditConfirm() async {
-    if (!_hasSelection) {
+  Future<void> _handleMove() async {
+    if (_selectedBookIds.isEmpty || _selectedFolderIds.isNotEmpty) {
       return;
     }
 
     final destinations = _moveDestinations();
-    final hasSelectedFolders = _selectedFolderIds.isNotEmpty;
-    final action = await showShelfEditActionSheet(
+    if (destinations.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('当前没有可移动的目标'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final parents = await showShelfMoveDestinationSheet(
+      context: context,
+      selectedBookCount: _selectedBookIds.length,
+      destinations: destinations,
+    );
+    if (!mounted || parents == null) {
+      return;
+    }
+    await _moveSelectedBooks(parents);
+  }
+
+  Future<void> _handleDelete() async {
+    if (!_hasSelection) {
+      return;
+    }
+
+    final confirmed = await showShelfDeleteConfirmSheet(
       context: context,
       selectedBookCount: _selectedBookIds.length,
       selectedFolderCount: _selectedFolderIds.length,
       selectedFolderBookCount: _selectedFolderContainedBookCount,
-      canMove:
-          !hasSelectedFolders &&
-          _selectedBookIds.isNotEmpty &&
-          destinations.isNotEmpty,
-      showRenameOption: _selectedFilter == 0,
-      canRename: _canRenameSelectedFolder,
-      moveDisabledReason:
-          hasSelectedFolders
-              ? '选中文件夹时暂不支持移动'
-              : destinations.isEmpty
-              ? '当前没有可移动的目标'
-              : null,
-      renameDisabledReason: '仅支持单选文件夹重命名',
     );
-
-    if (!mounted || action == null) {
+    if (!mounted || !confirmed) {
       return;
     }
-
-    switch (action) {
-      case ShelfEditAction.delete:
-        final confirmed = await showShelfDeleteConfirmSheet(
-          context: context,
-          selectedBookCount: _selectedBookIds.length,
-          selectedFolderCount: _selectedFolderIds.length,
-          selectedFolderBookCount: _selectedFolderContainedBookCount,
-        );
-        if (!mounted || !confirmed) {
-          return;
-        }
-        await _deleteSelectedItems();
-        break;
-      case ShelfEditAction.move:
-        final parents = await showShelfMoveDestinationSheet(
-          context: context,
-          selectedBookCount: _selectedBookIds.length,
-          destinations: destinations,
-        );
-        if (!mounted || parents == null) {
-          return;
-        }
-        await _moveSelectedBooks(parents);
-        break;
-      case ShelfEditAction.rename:
-        await _renameSelectedFolder();
-        break;
-    }
+    await _deleteSelectedItems();
   }
 
   Future<void> _deleteSelectedItems() async {
@@ -1018,6 +1003,11 @@ class ShelfPageState extends ConsumerState<ShelfPage> {
                 ? '编辑书架'
                 : '已选 $selectedImpactCount 本')
             : '书架';
+    final canMove =
+        _selectedBookIds.isNotEmpty &&
+        _selectedFolderIds.isEmpty &&
+        !_isSortMode;
+    final canDelete = _hasSelection && !_isSortMode;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 24, 16, 8),
@@ -1033,34 +1023,42 @@ class ShelfPageState extends ConsumerState<ShelfPage> {
             ),
           ),
           if (_isEditMode) ...[
-            if (_selectedFilter == 0)
-              IconButton(
-                icon: const Icon(Icons.add),
-                onPressed:
-                    (_hasSelection || _isSortMode) ? null : _createFolder,
-                tooltip: '新建文件夹',
+            IconButton(
+              icon: Icon(
+                _isSortMode ? Icons.checklist : Icons.drag_indicator,
+                color: _isSortMode ? colorScheme.primary : null,
               ),
-            if (_selectedFilter == 0)
+              onPressed: _selectedFilter == 0 ? _toggleSortMode : null,
+              tooltip: _isSortMode ? '返回选择' : '拖拽排序',
+            ),
+            if (_selectedFilter == 0 && _canRenameSelectedFolder)
               IconButton(
-                icon: Icon(
-                  Icons.drag_indicator,
-                  color: _isSortMode ? colorScheme.primary : null,
-                ),
-                onPressed: _hasSelection ? null : _toggleSortMode,
-                tooltip: _isSortMode ? '退出拖拽排序' : '拖拽排序',
+                icon: const Icon(Icons.drive_file_rename_outline),
+                onPressed: _renameSelectedFolder,
+                tooltip: '重命名文件夹',
               ),
+            IconButton(
+              icon: const Icon(Icons.drive_file_move_outline),
+              onPressed: canMove ? _handleMove : null,
+              tooltip: '移动',
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              onPressed: canDelete ? _handleDelete : null,
+              tooltip: '删除',
+            ),
             IconButton(
               icon: const Icon(Icons.close),
               onPressed: _isSortMode ? null : _exitEditMode,
-              tooltip: '取消',
-            ),
-            IconButton(
-              icon: const Icon(Icons.check),
-              onPressed:
-                  _hasSelection && !_isSortMode ? _handleEditConfirm : null,
-              tooltip: '确认',
+              tooltip: '退出编辑',
             ),
           ] else ...[
+            if (_selectedFilter == 0)
+              IconButton(
+                icon: const Icon(Icons.create_new_folder_outlined),
+                onPressed: _createFolder,
+                tooltip: '新建文件夹',
+              ),
             IconButton(
               icon: const Icon(Icons.edit_outlined),
               onPressed: _enterEditMode,
@@ -1090,14 +1088,17 @@ class ShelfPageState extends ConsumerState<ShelfPage> {
         itemBuilder: (context, index) {
           final isSelected = _selectedFilter == index;
           return Material(
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
+            color:
+                isSelected
+                    ? colorScheme.secondaryContainer
+                    : Colors.transparent,
+            borderRadius: BorderRadius.circular(20),
             child: InkWell(
               onTap: () => _onFilterChanged(index),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(20),
               child: Container(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
+                  horizontal: 18,
                   vertical: 8,
                 ),
                 alignment: Alignment.center,
@@ -1106,7 +1107,7 @@ class ShelfPageState extends ConsumerState<ShelfPage> {
                   style: TextStyle(
                     color:
                         isSelected
-                            ? colorScheme.primary
+                            ? colorScheme.onSecondaryContainer
                             : colorScheme.onSurfaceVariant,
                     fontWeight:
                         isSelected ? FontWeight.w600 : FontWeight.normal,
@@ -1121,44 +1122,50 @@ class ShelfPageState extends ConsumerState<ShelfPage> {
   }
 
   Widget _buildEmptyState(ColorScheme colorScheme, TextTheme textTheme) {
+    final isDefault = _selectedFilter == 0;
+    final icon = isDefault
+        ? Icons.folder_open_outlined
+        : _getFilterIcon(_selectedFilter);
+    final title = isDefault
+        ? '书架空空如也'
+        : '没有标记为${_getFilterLabel(_selectedFilter)}的书籍';
+    final description = isDefault
+        ? '点击右上角编辑，新建文件夹或整理书架'
+        : '长按详情页书签按钮即可标记';
+
     return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            _selectedFilter == 0
-                ? Icons.folder_open_outlined
-                : _getFilterIcon(_selectedFilter),
-            size: 64,
-            color: colorScheme.onSurfaceVariant,
-          ),
-          const SizedBox(height: 16),
-          if (_selectedFilter == 0)
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 480),
+        margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+        decoration: BoxDecoration(
+          color: colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 40, color: colorScheme.primary),
+            const SizedBox(height: 12),
             Text(
-              '书架空空如也',
+              title,
               textAlign: TextAlign.center,
-              style: textTheme.bodyLarge?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-            )
-          else ...[
-            Text(
-              '没有标记为${_getFilterLabel(_selectedFilter)}的书籍',
-              textAlign: TextAlign.center,
-              style: textTheme.bodyLarge?.copyWith(
-                color: colorScheme.onSurfaceVariant,
+              style: textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: colorScheme.onSurface,
               ),
             ),
             const SizedBox(height: 6),
             Text(
-              '长按详情页书签按钮即可标记',
+              description,
               textAlign: TextAlign.center,
               style: textTheme.bodySmall?.copyWith(
                 color: colorScheme.onSurfaceVariant,
               ),
             ),
           ],
-        ],
+        ),
       ),
     );
   }
@@ -1183,7 +1190,7 @@ class ShelfPageState extends ConsumerState<ShelfPage> {
                 useIOS26Style: settings.useIOS26Style,
               ),
             ),
-            gridDelegate: appBookGridDelegateForWidth(
+            gridDelegate: shelfGridDelegateForWidth(
               constraints.maxWidth - 24,
             ),
             itemCount: displayItems.length,
@@ -1236,7 +1243,7 @@ class ShelfPageState extends ConsumerState<ShelfPage> {
                     useIOS26Style: settings.useIOS26Style,
                   ),
                 ),
-                gridDelegate: appBookGridDelegateForWidth(
+                gridDelegate: shelfGridDelegateForWidth(
                   constraints.maxWidth - 24,
                 ),
                 itemCount: displayItems.length,

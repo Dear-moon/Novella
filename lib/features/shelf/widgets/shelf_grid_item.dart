@@ -7,6 +7,28 @@ import 'package:novella/src/widgets/book_cover_image.dart';
 import 'package:novella/src/widgets/book_cover_previewer.dart';
 import 'package:novella/src/widgets/book_type_badge.dart';
 
+/// Column count for the shelf grid. Matches the mobile 2.0 breakpoints (3-8)
+/// so wide desktop windows use more columns instead of oversized tiles.
+int shelfGridColumnsForWidth(double width) {
+  if (width >= 1280) return 8;
+  if (width >= 1024) return 7;
+  if (width >= 768) return 6;
+  if (width >= 600) return 5;
+  if (width >= 480) return 4;
+  return 3;
+}
+
+/// Cross-axis delegate for the shelf grid, using the mobile 2.0 column gap
+/// (10) / row gap (12) with a responsive column count.
+SliverGridDelegate shelfGridDelegateForWidth(double availableWidth) {
+  return SliverGridDelegateWithFixedCrossAxisCount(
+    crossAxisCount: shelfGridColumnsForWidth(availableWidth),
+    childAspectRatio: 0.58,
+    crossAxisSpacing: 10,
+    mainAxisSpacing: 12,
+  );
+}
+
 class ShelfBookGridItem extends ConsumerWidget {
   final Book? book;
   final String? coverUrlHint;
@@ -311,9 +333,9 @@ class _ShelfCardOverlay extends StatelessWidget {
     }
 
     return ColoredBox(
-      color: colorScheme.primary.withValues(alpha: 0.45),
+      color: const Color(0xB8D9475D), // Selection scrim rgba(217, 71, 93, 0.72).
       child: Center(
-        child: Icon(Icons.check_circle, color: colorScheme.onPrimary, size: 32),
+        child: Icon(Icons.check, color: Colors.white, size: 34),
       ),
     );
   }
