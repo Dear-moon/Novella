@@ -1,7 +1,7 @@
 import '../global.css';
 
 import { HeroUINativeProvider } from 'heroui-native';
-import { ToastProvider } from '@celia-sh/react-native-pretty-toast';
+import { ToastProvider, toast } from '@celia-sh/react-native-pretty-toast';
 import {
   DarkTheme,
   DefaultTheme,
@@ -19,6 +19,7 @@ import { ClientSessionFeedback } from '@/components/client-session-feedback';
 import { AppLocalizationProvider } from '@/localization/localization-provider';
 import { NativeAlertHost } from '@/components/native-alert-dialog';
 import { useAuthentication } from '@/hooks/use-authentication';
+import { autoCheckInOnLaunch } from '@/services/auto-check-in';
 import { hasStoredSession, startClient } from '@/services/client';
 import { loadAppSettings } from '@/services/settings';
 import { AppThemeProvider, useAppTheme } from '@/theme/app-theme';
@@ -49,6 +50,7 @@ function RootLayoutContent() {
   const authentication = useAuthentication();
   const { t } = useTranslation('navigation');
   const { t: tAuth } = useTranslation('auth');
+  const { t: tSettings } = useTranslation('settings');
   const { colorScheme, colors } = useAppTheme();
   const systemScreenStackPreset = useSystemScreenStackPreset();
   const usesComposeBottomSheets = process.env.EXPO_OS === 'android';
@@ -82,6 +84,27 @@ function RootLayoutContent() {
   useEffect(() => {
     if (authentication.status === 'authenticated') setHadAuthenticatedSession(true);
   }, [authentication.status]);
+
+  // Auto daily check-in once the session is authenticated (cold start).
+  // Idempotent: the use case skips when already signed today or when the
+  // setting is off; only a real sign-in surfaces a toast.
+  useEffect(() => {
+    if (authentication.status !== 'authenticated') return;
+    void autoCheckInOnLaunch().then((outcome) => {
+      if (!outcome) return;
+      toast.show(
+        {
+          icon: 'checkIn',
+          title: tSettings('profile.checkIn.successTitle'),
+          message: tSettings('profile.checkIn.successMessage', {
+            reward: outcome.reward,
+            streak: outcome.streak,
+          }),
+        },
+        { force: true },
+      );
+    });
+  }, [authentication.status, tSettings]);
 
   const hasAuthenticatedSession = authentication.status === 'authenticated'
     ? true

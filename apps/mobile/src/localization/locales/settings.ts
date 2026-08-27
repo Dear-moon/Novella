@@ -269,6 +269,10 @@ export const zhCNSettings = {
       successMessage: '连续第 {{streak}} 天 · 经验值 +{{reward}}',
       failedTitle: '无法签到',
     },
+    autoCheckIn: {
+      title: '启动自动签到',
+      description: '每次打开应用时自动签到',
+    },
     signOut: {
       title: '退出登录',
       signing: '正在退出…',
@@ -602,6 +606,10 @@ export const zhTWSettings: TranslationShape<typeof zhCNSettings> = {
       successTitle: '簽到成功',
       successMessage: '連續第 {{streak}} 天 · 經驗值 +{{reward}}',
       failedTitle: '無法簽到',
+    },
+    autoCheckIn: {
+      title: '啟動自動簽到',
+      description: '每次打開應用程式時自動簽到',
     },
     signOut: {
       title: '登出',

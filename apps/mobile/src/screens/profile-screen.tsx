@@ -11,6 +11,7 @@ import {
   NativeGroupedListSection,
 } from '@/components/native-grouped-list';
 import { ProfileAvatar } from '@/components/profile-avatar';
+import { NativeToggleRow } from '@/components/native-setting-controls';
 import { DisclosureIcon, NativeListValue } from '@/components/settings-row-accessories';
 import { useAuthentication } from '@/hooks/use-authentication';
 import { useProfile } from '@/hooks/use-profile';
@@ -18,6 +19,7 @@ import { formatDate } from '@/localization/formatters';
 import type { AppLocale } from '@/localization/locale';
 import { useAppLocale } from '@/localization/localization-provider';
 import { authentication, profile as profileUseCase } from '@/services/client';
+import { updateAppSettings, useAppSettings } from '@/services/settings';
 
 type CopyableProfileField = 'email' | 'inviteCode' | 'uid' | 'userName';
 
@@ -27,6 +29,7 @@ export function ProfileScreen() {
   const { t } = useTranslation('settings');
   const { t: tCommon } = useTranslation('common');
   const { error, profile, reload, status } = useProfile();
+  const settings = useAppSettings();
   const [copiedField, setCopiedField] = useState<CopyableProfileField | null>(null);
   const [checkingIn, setCheckingIn] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -170,6 +173,13 @@ export function ProfileScreen() {
               {...(profile.growth.signedToday ? {} : { onPress: () => void checkIn() })}
               title={checkingIn ? t('profile.checkIn.checking') : t('profile.checkIn.title')}
               trailing={<NativeListValue>{profile.growth.signedToday ? t('profile.checkIn.done') : t('profile.checkIn.action')}</NativeListValue>}
+            />
+            <NativeToggleRow
+              description={t('profile.autoCheckIn.description')}
+              icon="checkIn"
+              onValueChange={(value) => void updateAppSettings({ autoCheckIn: value })}
+              title={t('profile.autoCheckIn.title')}
+              value={settings.autoCheckIn}
             />
           </NativeGroupedListSection>
         </>
