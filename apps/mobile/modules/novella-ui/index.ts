@@ -48,3 +48,5 @@ export {
   NativeLightAppearanceScope,
   type NativeLightAppearanceScopeProps,
 } from './src/native-light-appearance-scope';
+
+export { decodeWoff2 } from './src/native-woff2';

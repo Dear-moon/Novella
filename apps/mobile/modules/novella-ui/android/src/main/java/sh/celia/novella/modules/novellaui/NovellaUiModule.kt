@@ -8,6 +8,12 @@ class NovellaUiModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("NovellaUi")
 
+    // Converts WOFF2 font bytes to SFNT (TTF/OTF) so the Skia reader's FreeType
+    // font manager can load book fonts. Returns null when the table is unsupported.
+    AsyncFunction("decodeWoff2") { woff2: ByteArray ->
+      Woff2Decoder.decode(woff2)
+    }
+
     View(BlurHashView::class) {
       Name("BlurHash")
 

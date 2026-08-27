@@ -1,6 +1,7 @@
 import { Skia } from '@shopify/react-native-skia';
 
 import { readerFontFile } from '@/services/reader-font-loader';
+import { decodeWoff2 } from '../../modules/novella-ui';
 
 /**
  * Font conversion and registration service for Skia renderer.
@@ -33,9 +34,15 @@ export async function loadAndRegisterFont(
 
   try {
     const woff2Bytes = await readWoff2Bytes(fontUrl);
-    const typeface = createTypeface(woff2Bytes);
+    const ttfBytes = await decodeWoff2(woff2Bytes);
+    if (!ttfBytes) {
+      // Decoder could not handle this font's tables; fall back to the system
+      // font so the reader still opens.
+      return null;
+    }
+    const typeface = createTypeface(ttfBytes);
     if (!typeface) {
-      throw new Error('Skia rejected the WOFF2 font data');
+      throw new Error('Skia rejected the decoded font data');
     }
 
     fontCache.set(fontUrl, { typeface, familyName });
@@ -92,15 +99,16 @@ export async function createFontManager(
   if (customFonts.length === 0) return null;
 
   const fontProvider = Skia.TypefaceFontProvider.Make();
+  let registeredAny = false;
   for (const { fontUrl, familyName } of customFonts) {
     const typeface = await loadAndRegisterFont(fontUrl, familyName);
-    if (!typeface) {
-      throw new Error(`Reader font ${familyName} did not produce a Typeface`);
-    }
+    if (!typeface) continue;
     registerTypefaceWithProvider(fontProvider, typeface, familyName);
+    registeredAny = true;
   }
 
-  return fontProvider;
+  // No custom typeface could be loaded; let the reader use the system font.
+  return registeredAny ? fontProvider : null;
 }
 
 /** Clear the in-memory font cache. */

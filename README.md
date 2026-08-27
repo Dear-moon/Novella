@@ -27,6 +27,12 @@
 
 React Native 重写正在积极开发中，欢迎向本仓库提交代码。功能开发清单见 [Issues](https://github.com/celia-sh/Novella/issues) 中的待办事项；如果你想做的功能不在清单中，请先在 [Discussions](https://github.com/celia-sh/Novella/discussions) 中讨论。
 
+## 平台维护状态
+
+- **Android**：本分支（`v2.a`）的维护重点。上游因作者原因转向 iOS-only（阅读器改用 Readium），本分支基于多平台时代的 Skia 跨平台阅读器继续维护 Android，并修复了书字体（WOFF2）解码等问题。
+- **iOS**：建议使用上游官方版本（celia-sh/Novella，Readium 原生阅读器，体验更佳）。
+- **桌面（PC）**：React Native 无桌面目标；桌面端使用历史 Flutter 实现（`archive/flutter` 分支）。
+
 ## 移动端开发
 
 移动端使用 Expo Development Build 开发，支持 Android 与 iOS。
