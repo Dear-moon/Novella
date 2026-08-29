@@ -14,6 +14,11 @@ class NovellaUiModule : Module() {
       Woff2Decoder.decode(woff2)
     }
 
+    // Subsets a decoded SFNT to the given codepoints for a per-chapter font.
+    AsyncFunction("subsetFont") { sfnt: ByteArray, keepCodepoints: IntArray ->
+      FontSubsetter.subset(sfnt, keepCodepoints)
+    }
+
     View(BlurHashView::class) {
       Name("BlurHash")
 

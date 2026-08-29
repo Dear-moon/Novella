@@ -49,4 +49,4 @@ export {
   type NativeLightAppearanceScopeProps,
 } from './src/native-light-appearance-scope';
 
-export { decodeWoff2 } from './src/native-woff2';
+export { decodeWoff2, subsetFont } from './src/native-woff2';

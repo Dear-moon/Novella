@@ -61,6 +61,7 @@ import {
   type ReaderPageTapHandler,
 } from '@/hooks/use-reader-chrome-visibility';
 import { useReaderFont } from '@/hooks/use-reader-font';
+import { collectReaderCodepoints } from '@/services/reader-codepoints';
 import { useReaderImageDimensions } from '@/hooks/use-reader-image-dimensions';
 import { useReaderWindowDimensions } from '@/hooks/use-reader-window-dimensions';
 import { createFontManager } from '@/services/skia-font-loader';
@@ -147,6 +148,11 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
     );
     return inlineNovelFootnotesAfterBlocks(sourceBlocks, footnotes.notesById);
   }, [content, footnotes.html, footnotes.notesById]);
+  // Subset covers the rendered text's codepoints; a chapter switch changes them.
+  const contentCodepoints = useMemo(
+    () => (content ? collectReaderCodepoints(blocks) : []),
+    [blocks, content],
+  );
   const imageHtmlBlocks = useMemo(
     () => blocks.map((block) => block.html),
     [blocks],
@@ -302,11 +308,12 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
     setFontMgrLoading(true);
     setFontMgrError(null);
 
-    // Create custom font manager with the loaded font
+    // Create a custom font manager subset to the current chapter's codepoints.
     createFontManager([
       {
         fontUrl: resolvedFontUrl,
         familyName: readerFont.family ?? 'NovelFont',
+        codepoints: contentCodepoints,
       }
     ])
       .then((mgr) => {
@@ -318,7 +325,7 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
         setFontMgr(null);
         setFontMgrLoading(false);
       });
-  }, [requiresReaderFont, readerFont.status, readerFont.family, content?.chapter.fontUrl]);
+  }, [requiresReaderFont, readerFont.status, readerFont.family, content?.chapter.fontUrl, contentCodepoints]);
 
   const layout = useMemo(() => {
     if (!content || fontLoading || blocks.length === 0) return null;
