@@ -160,6 +160,13 @@ export function ProfileScreen() {
               title={t('profile.checkIn.title')}
               trailing={<NativeListValue>{profile.growth.signedToday ? t('profile.checkIn.done') : t('profile.checkIn.action')}</NativeListValue>}
             />
+            <NativeGroupedListRow
+              description={t('profile.shop.description')}
+              icon="shop"
+              onPress={() => router.push('/settings/shop')}
+              title={t('profile.shop.title')}
+              trailing={<NativeListValue>{new Intl.NumberFormat(locale).format(profile.growth.coin)}</NativeListValue>}
+            />
             <NativeToggleRow
               description={t('profile.autoCheckIn.description')}
               icon="checkIn"

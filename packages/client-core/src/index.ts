@@ -4,6 +4,7 @@ import {
   type AnnouncementDetail,
   type AnnouncementPage,
   type AppNotificationPage,
+  type BuyShopItemResult,
   type CommunityFavoriteToggleResult,
   type CommunityFeedPayload,
   type CommunityHomePayload,
@@ -41,6 +42,8 @@ import {
   type ReadHistory,
   type SaveReadPositionRequest,
   type ShelfItem,
+  type ShopInfo,
+  type ShopMyItems,
   type SignInCalendar,
   type SignMakeupCardResult,
   type UserProfile,
@@ -284,6 +287,9 @@ export interface PointsUseCase {
   getMakeupCardCount(): Promise<number>;
   useSignMakeupCard(date: string): Promise<SignMakeupCardResult>;
   getPointLog(kind: PointLogKind, page: number, size: number): Promise<PointLogPage>;
+  getShop(): Promise<ShopInfo>;
+  getMyItems(): Promise<ShopMyItems>;
+  buyShopItem(key: string, quantity: number): Promise<BuyShopItemResult>;
 }
 
 export interface AuthenticationUseCase {
@@ -1100,6 +1106,15 @@ export function createPointsUseCase(api: ApiClient): PointsUseCase {
     },
     getPointLog(kind: PointLogKind, page: number, size: number) {
       return kind === 'coin' ? api.getCoinLog(page, size) : api.getPointLog(page, size);
+    },
+    getShop() {
+      return api.getShop();
+    },
+    getMyItems() {
+      return api.getMyItems();
+    },
+    buyShopItem(key: string, quantity: number) {
+      return api.buyShopItem(key, quantity);
     },
   });
 }

@@ -55,6 +55,15 @@ export default function SettingsStackLayout() {
           title: t('profile.pointLog.expTitle'),
         }}
       />
+      <Stack.Screen
+        name="shop"
+        options={{
+          ...badgeSheetOptions,
+          headerShown: false,
+          presentation: isAndroid ? 'transparentModal' : 'formSheet',
+          title: t('profile.shop.title'),
+        }}
+      />
       <Stack.Screen name="appearance" options={{ title: t('appearance.title') }} />
       <Stack.Screen name="cache" options={{ title: t('cache.title') }} />
       <Stack.Screen name="about" options={{ title: t('about.title') }} />

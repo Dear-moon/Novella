@@ -569,11 +569,38 @@ export interface SignInCalendar {
 
 export interface ShopOwnedItem {
   key: string;
+  name: string;
+  description: string;
+  image: string;
   quantity: number;
 }
 
 export interface ShopMyItems {
   items: ShopOwnedItem[];
+}
+
+export interface ShopItem {
+  key: string;
+  name: string;
+  description: string;
+  image: string;
+  price: number;
+  owned: number;
+  monthlyLimit: number;
+  monthlyPurchased: number;
+}
+
+export interface ShopInfo {
+  coin: number;
+  items: ShopItem[];
+}
+
+export interface BuyShopItemResult {
+  key: string;
+  owned: number;
+  coin: number;
+  cost: number;
+  monthlyPurchased: number;
 }
 
 export interface SignMakeupCardResult {
@@ -1438,6 +1465,14 @@ export class ApiClient {
     return this.invoke('GetCoinLog', { Page: page, Size: size }, decodePointLogPage);
   }
 
+  getShop(): Promise<ShopInfo> {
+    return this.invoke('GetShop', {}, decodeShopInfo);
+  }
+
+  buyShopItem(key: string, quantity: number): Promise<BuyShopItemResult> {
+    return this.invoke('BuyShopItem', { Key: key, Quantity: quantity }, decodeBuyShopItemResult);
+  }
+
   async resetPassword(request: ResetPasswordRequest): Promise<void> {
     const response = await this.#scheduler.add(() => this.#transport.request<unknown>({
       body: {
@@ -1680,7 +1715,43 @@ function decodeOwnedItem(value: unknown): ShopOwnedItem {
   const record = asRecord(value, 'owned item');
   return {
     key: asStringOrEmpty(record.Key),
+    name: asStringOrEmpty(record.Name),
+    description: asStringOrEmpty(record.Description),
+    image: asStringOrEmpty(record.Image),
     quantity: asNumber(record.Quantity, 0),
+  };
+}
+
+export function decodeShopInfo(value: unknown): ShopInfo {
+  const record = asRecord(value, 'shop response');
+  return {
+    coin: asNumber(record.Coin, 0),
+    items: Array.isArray(record.Items) ? record.Items.map(decodeShopItem) : [],
+  };
+}
+
+function decodeShopItem(value: unknown): ShopItem {
+  const record = asRecord(value, 'shop item');
+  return {
+    key: asString(record.Key),
+    name: asStringOrEmpty(record.Name),
+    description: asStringOrEmpty(record.Description),
+    image: asStringOrEmpty(record.Image),
+    price: asNumber(record.Price, 0),
+    owned: asNumber(record.Owned, 0),
+    monthlyLimit: asNumber(record.MonthlyLimit, 0),
+    monthlyPurchased: asNumber(record.MonthlyPurchased, 0),
+  };
+}
+
+export function decodeBuyShopItemResult(value: unknown): BuyShopItemResult {
+  const record = asRecord(value, 'buy shop item response');
+  return {
+    key: asStringOrEmpty(record.Key),
+    owned: asNumber(record.Owned, 0),
+    coin: asNumber(record.Coin, 0),
+    cost: asNumber(record.Cost, 0),
+    monthlyPurchased: asNumber(record.MonthlyPurchased, 0),
   };
 }
 

@@ -1086,7 +1086,7 @@ test('maps sign calendar, makeup cards, and point logs to Web-Master Hub contrac
     days: [{ signDate: '2026-08-01', streak: 3, reward: 5 }],
   });
   assert.deepEqual(await client.getMyItems(), {
-    items: [{ key: 'sign_makeup', quantity: 2 }],
+    items: [{ key: 'sign_makeup', name: '', description: '', image: '', quantity: 2 }],
   });
   assert.deepEqual(await client.useSignMakeupCard('2026-08-01'), { owned: 1, streak: 4 });
   assert.deepEqual(await client.getPointLog(1, 20), {
@@ -1106,5 +1106,52 @@ test('maps sign calendar, makeup cards, and point logs to Web-Master Hub contrac
     { method: 'UseSignMakeupCard', args: [{ Date: '2026-08-01' }, { UseGzip: true }] },
     { method: 'GetPointLog', args: [{ Page: 1, Size: 20 }, { UseGzip: true }] },
     { method: 'GetCoinLog', args: [{ Page: 1, Size: 20 }, { UseGzip: true }] },
+  ]);
+});
+
+test('maps shop shelf, owned items, and purchase to Web-Master Hub contracts', async () => {
+  const calls = [];
+  const client = new ApiClient(
+    { async request() { throw new Error('not used'); } },
+    {
+      async connect() {},
+      async close() {},
+      async invoke(method, args) {
+        calls.push({ method, args });
+        if (method === 'GetShop') {
+          return { Success: true, Response: { Coin: 120, Items: [{ Key: 'sign_makeup', Name: '补签卡', Description: '补签', Image: '/img/makeup.png', Price: 100, Owned: 2, MonthlyLimit: 3, MonthlyPurchased: 1 }] } };
+        }
+        if (method === 'GetMyItems') {
+          return { Success: true, Response: { Items: [{ Key: 'sign_makeup', Name: '补签卡', Description: '补签', Image: '/img/makeup.png', Quantity: 2 }] } };
+        }
+        if (method === 'BuyShopItem') {
+          return { Success: true, Response: { Key: 'sign_makeup', Owned: 3, Coin: 20, Cost: 100, MonthlyPurchased: 2 } };
+        }
+        return { Success: true, Response: null };
+      },
+    },
+    null,
+    new RateLimitRequestScheduler(20, 10),
+  );
+
+  assert.deepEqual(await client.getShop(), {
+    coin: 120,
+    items: [{ key: 'sign_makeup', name: '补签卡', description: '补签', image: '/img/makeup.png', price: 100, owned: 2, monthlyLimit: 3, monthlyPurchased: 1 }],
+  });
+  assert.deepEqual(await client.getMyItems(), {
+    items: [{ key: 'sign_makeup', name: '补签卡', description: '补签', image: '/img/makeup.png', quantity: 2 }],
+  });
+  assert.deepEqual(await client.buyShopItem('sign_makeup', 1), {
+    key: 'sign_makeup',
+    owned: 3,
+    coin: 20,
+    cost: 100,
+    monthlyPurchased: 2,
+  });
+
+  assert.deepEqual(calls, [
+    { method: 'GetShop', args: [{}, { UseGzip: true }] },
+    { method: 'GetMyItems', args: [{}, { UseGzip: true }] },
+    { method: 'BuyShopItem', args: [{ Key: 'sign_makeup', Quantity: 1 }, { UseGzip: true }] },
   ]);
 });

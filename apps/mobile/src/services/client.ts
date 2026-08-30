@@ -92,8 +92,13 @@ export { authentication, storage };
 
 export type { PointLogKind } from '@novella/client-core';
 export type {
+  BuyShopItemResult,
   PointLogItem,
   PointLogPage,
+  ShopInfo,
+  ShopItem,
+  ShopMyItems,
+  ShopOwnedItem,
   SignInCalendar,
   SignMakeupCardResult,
 } from '@novella/api-client';
