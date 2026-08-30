@@ -165,6 +165,17 @@ export function ReaderSettingsContent() {
           selectedValue={settings.comicReaderViewMode}
           title={t('reader.behavior.comicModeTitle')}
         />
+        <NativePickerRow
+          description={t('reader.behavior.fontLoadModeDescription')}
+          icon="textSize"
+          onValueChange={(value) => void updateAppSettings({ readerFontLoadMode: value })}
+          options={[
+            { label: t('reader.behavior.fontLoadModeOptions.book'), value: 'book' },
+            { label: t('reader.behavior.fontLoadModeOptions.chapter'), value: 'chapter' },
+          ] as const}
+          selectedValue={settings.readerFontLoadMode}
+          title={t('reader.behavior.fontLoadModeTitle')}
+        />
         <NativeToggleRow
           description={t('reader.behavior.pagedTapDescription')}
           icon="readingMode"

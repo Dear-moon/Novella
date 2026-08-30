@@ -12,6 +12,7 @@ import {
   createDiscoveryUseCase,
   createHistoryUseCase,
   createNotificationsUseCase,
+  createPointsUseCase,
   createProfileUseCase,
   createReaderUseCase,
   createShelfUseCase,
@@ -25,6 +26,7 @@ import {
   type DiscoveryUseCase,
   type HistoryUseCase,
   type NotificationsUseCase,
+  type PointsUseCase,
   type ProfileUseCase,
   type ReaderUseCase,
   type ShelfUseCase,
@@ -76,6 +78,7 @@ export const community: CommunityUseCase = createCommunityUseCase(api);
 export const notifications: NotificationsUseCase = createNotificationsUseCase(api);
 export const history: HistoryUseCase = createHistoryUseCase(api);
 export const profile: ProfileUseCase = createProfileUseCase(api);
+export const points: PointsUseCase = createPointsUseCase(api);
 export const reader: ReaderUseCase = createReaderUseCase(api);
 export const shelf: ShelfUseCase = createShelfUseCase(api);
 authentication = createAuthenticationUseCase(
@@ -86,6 +89,14 @@ authentication = createAuthenticationUseCase(
 );
 
 export { authentication, storage };
+
+export type { PointLogKind } from '@novella/client-core';
+export type {
+  PointLogItem,
+  PointLogPage,
+  SignInCalendar,
+  SignMakeupCardResult,
+} from '@novella/api-client';
 
 /**
  * Local-only probe of whether a session was ever stored. Resolves fast (no

@@ -18,9 +18,14 @@ import {
 import { normalizeReaderBackgroundColor } from '@/theme/reader-theme';
 
 export type ReaderViewMode = 'paged' | 'scroll';
+export type ReaderFontLoadMode = 'book' | 'chapter';
 export type ThemeMode = 'system' | 'light' | 'dark';
 export type TranslationMode = 'none' | 't2s' | 's2t';
 export type CleanChapterTitleScope = 'continueReading' | 'readerTitle';
+
+export function isReaderFontLoadMode(value: unknown): value is ReaderFontLoadMode {
+  return value === 'book' || value === 'chapter';
+}
 
 export const CLEAN_CHAPTER_TITLE_SCOPES: readonly CleanChapterTitleScope[] = [
   'continueReading',
@@ -64,6 +69,7 @@ export interface AppSettings {
   oledBlack: boolean;
   novelReaderBackgroundColor: string | null;
   novelReaderViewMode: ReaderViewMode;
+  readerFontLoadMode: ReaderFontLoadMode;
   comicReaderViewMode: ReaderViewMode;
   readerPagedTapNavigation: boolean;
   readerFirstLineIndent: boolean;
@@ -104,6 +110,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   readerPreloadWindow: 3,
   novelReaderBackgroundColor: null,
   novelReaderViewMode: 'paged',
+  readerFontLoadMode: 'book',
   comicReaderViewMode: 'paged',
   readerPagedTapNavigation: true,
   readerSidePadding: 30,
@@ -193,6 +200,9 @@ function decodeSettings(value: unknown): AppSettings {
   const comicReaderViewMode = isReaderViewMode(candidate.comicReaderViewMode)
     ? candidate.comicReaderViewMode
     : legacyReaderViewMode ?? DEFAULT_SETTINGS.comicReaderViewMode;
+  const readerFontLoadMode = isReaderFontLoadMode(candidate.readerFontLoadMode)
+    ? candidate.readerFontLoadMode
+    : DEFAULT_SETTINGS.readerFontLoadMode;
   const readerPagedTapNavigation = typeof candidate.readerPagedTapNavigation === 'boolean'
     ? candidate.readerPagedTapNavigation
     : typeof candidate.novelReaderPagedTapNavigation === 'boolean'
@@ -250,6 +260,7 @@ function decodeSettings(value: unknown): AppSettings {
       candidate.novelReaderBackgroundColor,
     ),
     novelReaderViewMode,
+    readerFontLoadMode,
     comicReaderViewMode,
     readerPagedTapNavigation,
     ...(typeof candidate.readerImagePreviewOpenOnLongPress === 'boolean'

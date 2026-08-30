@@ -37,6 +37,24 @@ export default function SettingsStackLayout() {
           title: t('badges.title'),
         }}
       />
+      <Stack.Screen
+        name="check-in-calendar"
+        options={{
+          ...badgeSheetOptions,
+          headerShown: false,
+          presentation: isAndroid ? 'transparentModal' : 'formSheet',
+          title: t('profile.checkIn.title'),
+        }}
+      />
+      <Stack.Screen
+        name="point-log"
+        options={{
+          ...badgeSheetOptions,
+          headerShown: false,
+          presentation: isAndroid ? 'transparentModal' : 'formSheet',
+          title: t('profile.pointLog.expTitle'),
+        }}
+      />
       <Stack.Screen name="appearance" options={{ title: t('appearance.title') }} />
       <Stack.Screen name="cache" options={{ title: t('cache.title') }} />
       <Stack.Screen name="about" options={{ title: t('about.title') }} />

@@ -18,7 +18,7 @@ import { useProfile } from '@/hooks/use-profile';
 import { formatDate } from '@/localization/formatters';
 import type { AppLocale } from '@/localization/locale';
 import { useAppLocale } from '@/localization/localization-provider';
-import { authentication, profile as profileUseCase } from '@/services/client';
+import { authentication } from '@/services/client';
 import { updateAppSettings, useAppSettings } from '@/services/settings';
 
 type CopyableProfileField = 'email' | 'inviteCode' | 'uid' | 'userName';
@@ -31,7 +31,6 @@ export function ProfileScreen() {
   const { error, profile, reload, status } = useProfile();
   const settings = useAppSettings();
   const [copiedField, setCopiedField] = useState<CopyableProfileField | null>(null);
-  const [checkingIn, setCheckingIn] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -46,28 +45,6 @@ export function ProfileScreen() {
     if (copyTimer.current) clearTimeout(copyTimer.current);
     setCopiedField(field);
     copyTimer.current = setTimeout(() => setCopiedField(null), 1_200);
-  }
-
-  async function checkIn() {
-    if (!profile || profile.growth.signedToday || checkingIn) return;
-    setCheckingIn(true);
-    try {
-      const outcome = await profileUseCase.checkIn();
-      showAlert(
-        t('profile.checkIn.successTitle'),
-        t('profile.checkIn.successMessage', {
-          reward: outcome.result.reward,
-          streak: outcome.result.streak,
-        }),
-      );
-    } catch (checkInError) {
-      showAlert(
-        t('profile.checkIn.failedTitle'),
-        checkInError instanceof Error ? checkInError.message : t('profile.tryAgain'),
-      );
-    } finally {
-      setCheckingIn(false);
-    }
   }
 
   function confirmSignOut() {
@@ -162,16 +139,25 @@ export function ProfileScreen() {
 
           <NativeGroupedListSection title={t('profile.sections.growth')}>
             <StaticValueRow icon="level" label={t('profile.fields.level')} value={t('profile.fields.levelValue', { level: profile.growth.level })} />
-            <StaticValueRow icon="experience" label={t('profile.fields.experience')} value={new Intl.NumberFormat(locale).format(profile.growth.experience)} />
-            <StaticValueRow icon="coins" label={t('profile.fields.coins')} value={new Intl.NumberFormat(locale).format(profile.growth.coin)} />
+            <StaticValueRow
+              icon="experience"
+              label={t('profile.fields.experience')}
+              onPress={() => router.push({ pathname: '/settings/point-log', params: { kind: 'exp' } })}
+              value={new Intl.NumberFormat(locale).format(profile.growth.experience)}
+            />
+            <StaticValueRow
+              icon="coins"
+              label={t('profile.fields.coins')}
+              onPress={() => router.push({ pathname: '/settings/point-log', params: { kind: 'coin' } })}
+              value={new Intl.NumberFormat(locale).format(profile.growth.coin)}
+            />
             <NativeGroupedListRow
               description={profile.growth.signedToday
                 ? t('profile.checkIn.signedDescription', { days: profile.growth.signInStreak })
                 : t('profile.checkIn.availableDescription', { days: profile.growth.signInStreak })}
-              disabled={profile.growth.signedToday || checkingIn}
               icon="checkIn"
-              {...(profile.growth.signedToday ? {} : { onPress: () => void checkIn() })}
-              title={checkingIn ? t('profile.checkIn.checking') : t('profile.checkIn.title')}
+              onPress={() => router.push('/settings/check-in-calendar')}
+              title={t('profile.checkIn.title')}
               trailing={<NativeListValue>{profile.growth.signedToday ? t('profile.checkIn.done') : t('profile.checkIn.action')}</NativeListValue>}
             />
             <NativeToggleRow
@@ -229,16 +215,19 @@ function CopyableValueRow({
 function StaticValueRow({
   icon,
   label,
+  onPress,
   value,
 }: {
   icon: 'coins' | 'experience' | 'level' | 'registered' | 'userGroup';
   label: string;
+  onPress?: () => void;
   value: string;
 }) {
   return (
     <NativeGroupedListRow
       icon={icon}
       title={label}
+      {...(onPress ? { onPress } : {})}
       trailing={<NativeListValue>{value}</NativeListValue>}
     />
   );

@@ -36,10 +36,13 @@ import {
   type NovelContent,
   type NovelContentRequest,
   type OnlineInfo,
+  type PointLogPage,
   type PostCommentRequest,
   type ReadHistory,
   type SaveReadPositionRequest,
   type ShelfItem,
+  type SignInCalendar,
+  type SignMakeupCardResult,
   type UserProfile,
 } from '@novella/api-client';
 import type {
@@ -272,6 +275,15 @@ export interface ProfileUseCase {
   load(): Promise<UserProfile>;
   setAvatar(url: string): Promise<UserProfile>;
   subscribe(listener: (profile: UserProfile) => void): () => void;
+}
+
+export type PointLogKind = 'exp' | 'coin';
+
+export interface PointsUseCase {
+  getSignInCalendar(year: number, month: number): Promise<SignInCalendar>;
+  getMakeupCardCount(): Promise<number>;
+  useSignMakeupCard(date: string): Promise<SignMakeupCardResult>;
+  getPointLog(kind: PointLogKind, page: number, size: number): Promise<PointLogPage>;
 }
 
 export interface AuthenticationUseCase {
@@ -1068,6 +1080,26 @@ export function createProfileUseCase(api: ApiClient): ProfileUseCase {
     subscribe(listener: (profile: UserProfile) => void) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+  });
+}
+
+const SIGN_MAKEUP_ITEM_KEY = 'sign_makeup';
+
+export function createPointsUseCase(api: ApiClient): PointsUseCase {
+  return Object.freeze({
+    getSignInCalendar(year: number, month: number) {
+      return api.getSignInCalendar(year, month);
+    },
+    async getMakeupCardCount() {
+      const items = await api.getMyItems();
+      return items.items.find((item) => item.key === SIGN_MAKEUP_ITEM_KEY)?.quantity ?? 0;
+    },
+    useSignMakeupCard(date: string) {
+      return api.useSignMakeupCard(date);
+    },
+    getPointLog(kind: PointLogKind, page: number, size: number) {
+      return kind === 'coin' ? api.getCoinLog(page, size) : api.getPointLog(page, size);
     },
   });
 }

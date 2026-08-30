@@ -6,9 +6,10 @@ import { decodeWoff2, subsetFont } from '../../modules/novella-ui';
 /**
  * Font conversion and registration service for the Skia renderer.
  *
- * The decoded SFNT is subset to the codepoints of the rendered content (one
- * chapter at a time), so the registered typeface stays small. The full font is
- * decoded once per book and cached; only the cheap subset runs per chapter.
+ * When `codepoints` are provided the decoded SFNT is subset to them, so the
+ * registered typeface stays small (per-chapter mode). With no codepoints the
+ * full decoded SFNT is used and cached once per font URL (per-book mode). The
+ * WOFF2 is decoded to an SFNT at most once and cached regardless.
  */
 
 interface TypefaceEntry {

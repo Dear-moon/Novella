@@ -148,10 +148,13 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
     );
     return inlineNovelFootnotesAfterBlocks(sourceBlocks, footnotes.notesById);
   }, [content, footnotes.html, footnotes.notesById]);
-  // Subset covers the rendered text's codepoints; a chapter switch changes them.
+  // Per-chapter mode subsets the font to the rendered text's codepoints; a
+  // chapter switch changes them. Per-book mode passes no codepoints so the full
+  // decoded font is used and cached once for the whole book.
+  const fontLoadMode = settings.readerFontLoadMode;
   const contentCodepoints = useMemo(
-    () => (content ? collectReaderCodepoints(blocks) : []),
-    [blocks, content],
+    () => (content && fontLoadMode === 'chapter' ? collectReaderCodepoints(blocks) : []),
+    [blocks, content, fontLoadMode],
   );
   const imageHtmlBlocks = useMemo(
     () => blocks.map((block) => block.html),
@@ -308,7 +311,8 @@ export function ReaderScreen({ bookId, sortNum, openPosition = 'saved' }: Reader
     setFontMgrLoading(true);
     setFontMgrError(null);
 
-    // Create a custom font manager subset to the current chapter's codepoints.
+    // Create a custom font manager; in per-chapter mode it is subset to the
+    // current chapter's codepoints, in per-book mode no codepoints are passed.
     createFontManager([
       {
         fontUrl: resolvedFontUrl,

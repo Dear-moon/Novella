@@ -1051,3 +1051,60 @@ function communityFeedItem(overrides = {}) {
     ...overrides,
   };
 }
+
+test('maps sign calendar, makeup cards, and point logs to Web-Master Hub contracts', async () => {
+  const calls = [];
+  const client = new ApiClient(
+    { async request() { throw new Error('not used'); } },
+    {
+      async connect() {},
+      async close() {},
+      async invoke(method, args) {
+        calls.push({ method, args });
+        if (method === 'GetSignInCalendar') {
+          return { Success: true, Response: { Year: 2026, Month: 8, Days: [{ SignDate: '2026-08-01', Streak: 3, Reward: 5 }] } };
+        }
+        if (method === 'GetMyItems') {
+          return { Success: true, Response: { Items: [{ Key: 'sign_makeup', Quantity: 2 }] } };
+        }
+        if (method === 'UseSignMakeupCard') {
+          return { Success: true, Response: { Owned: 1, Streak: 4 } };
+        }
+        if (method === 'GetPointLog' || method === 'GetCoinLog') {
+          return { Success: true, Response: { TotalPages: 2, Page: 1, Data: [{ Source: 'SignIn', Amount: 5, Balance: 100, RefId: null, OccurredAt: '2026-08-01T00:00:00.000Z' }] } };
+        }
+        return { Success: true, Response: null };
+      },
+    },
+    null,
+    new RateLimitRequestScheduler(20, 10),
+  );
+
+  assert.deepEqual(await client.getSignInCalendar(2026, 8), {
+    year: 2026,
+    month: 8,
+    days: [{ signDate: '2026-08-01', streak: 3, reward: 5 }],
+  });
+  assert.deepEqual(await client.getMyItems(), {
+    items: [{ key: 'sign_makeup', quantity: 2 }],
+  });
+  assert.deepEqual(await client.useSignMakeupCard('2026-08-01'), { owned: 1, streak: 4 });
+  assert.deepEqual(await client.getPointLog(1, 20), {
+    totalPages: 2,
+    page: 1,
+    data: [{ source: 'SignIn', amount: 5, balance: 100, refId: null, occurredAt: '2026-08-01T00:00:00.000Z' }],
+  });
+  assert.deepEqual(await client.getCoinLog(1, 20), {
+    totalPages: 2,
+    page: 1,
+    data: [{ source: 'SignIn', amount: 5, balance: 100, refId: null, occurredAt: '2026-08-01T00:00:00.000Z' }],
+  });
+
+  assert.deepEqual(calls, [
+    { method: 'GetSignInCalendar', args: [{ Year: 2026, Month: 8 }, { UseGzip: true }] },
+    { method: 'GetMyItems', args: [{}, { UseGzip: true }] },
+    { method: 'UseSignMakeupCard', args: [{ Date: '2026-08-01' }, { UseGzip: true }] },
+    { method: 'GetPointLog', args: [{ Page: 1, Size: 20 }, { UseGzip: true }] },
+    { method: 'GetCoinLog', args: [{ Page: 1, Size: 20 }, { UseGzip: true }] },
+  ]);
+});

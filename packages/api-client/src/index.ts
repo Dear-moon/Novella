@@ -555,6 +555,46 @@ export interface DailyCheckInResult {
   level: number;
 }
 
+export interface SignInCalendarDay {
+  signDate: string;
+  streak: number;
+  reward: number;
+}
+
+export interface SignInCalendar {
+  year: number;
+  month: number;
+  days: SignInCalendarDay[];
+}
+
+export interface ShopOwnedItem {
+  key: string;
+  quantity: number;
+}
+
+export interface ShopMyItems {
+  items: ShopOwnedItem[];
+}
+
+export interface SignMakeupCardResult {
+  owned: number;
+  streak: number;
+}
+
+export interface PointLogItem {
+  source: string;
+  amount: number;
+  balance: number;
+  refId: number | null;
+  occurredAt: string;
+}
+
+export interface PointLogPage {
+  totalPages: number;
+  page: number;
+  data: PointLogItem[];
+}
+
 export type CommunityBoardKey = string;
 export type CommunityFeedOrder = 'reply' | 'latest' | 'hot' | 'featured';
 export type CommunityFeedScope = 'all' | 'today' | 'week';
@@ -1378,6 +1418,26 @@ export class ApiClient {
     return this.invoke('SignIn', {}, decodeDailyCheckInResult);
   }
 
+  getSignInCalendar(year: number, month: number): Promise<SignInCalendar> {
+    return this.invoke('GetSignInCalendar', { Year: year, Month: month }, decodeSignInCalendar);
+  }
+
+  getMyItems(): Promise<ShopMyItems> {
+    return this.invoke('GetMyItems', {}, decodeShopMyItems);
+  }
+
+  useSignMakeupCard(date: string): Promise<SignMakeupCardResult> {
+    return this.invoke('UseSignMakeupCard', { Date: date }, decodeSignMakeupCardResult);
+  }
+
+  getPointLog(page: number, size: number): Promise<PointLogPage> {
+    return this.invoke('GetPointLog', { Page: page, Size: size }, decodePointLogPage);
+  }
+
+  getCoinLog(page: number, size: number): Promise<PointLogPage> {
+    return this.invoke('GetCoinLog', { Page: page, Size: size }, decodePointLogPage);
+  }
+
   async resetPassword(request: ResetPasswordRequest): Promise<void> {
     const response = await this.#scheduler.add(() => this.#transport.request<unknown>({
       body: {
@@ -1588,6 +1648,67 @@ export function decodeDailyCheckInResult(value: unknown): DailyCheckInResult {
     streak: asNumber(record.Streak),
     experience: asNumber(record.Exp),
     level: asNumber(record.Level),
+  };
+}
+
+export function decodeSignInCalendar(value: unknown): SignInCalendar {
+  const record = asRecord(value, 'sign-in calendar response');
+  return {
+    year: asNumber(record.Year),
+    month: asNumber(record.Month),
+    days: Array.isArray(record.Days) ? record.Days.map(decodeSignInCalendarDay) : [],
+  };
+}
+
+function decodeSignInCalendarDay(value: unknown): SignInCalendarDay {
+  const record = asRecord(value, 'sign-in calendar day');
+  return {
+    signDate: asString(record.SignDate),
+    streak: asNumber(record.Streak, 0),
+    reward: asNumber(record.Reward, 0),
+  };
+}
+
+export function decodeShopMyItems(value: unknown): ShopMyItems {
+  const record = asRecord(value, 'shop items response');
+  return {
+    items: Array.isArray(record.Items) ? record.Items.map(decodeOwnedItem) : [],
+  };
+}
+
+function decodeOwnedItem(value: unknown): ShopOwnedItem {
+  const record = asRecord(value, 'owned item');
+  return {
+    key: asStringOrEmpty(record.Key),
+    quantity: asNumber(record.Quantity, 0),
+  };
+}
+
+export function decodeSignMakeupCardResult(value: unknown): SignMakeupCardResult {
+  const record = asRecord(value, 'sign makeup card response');
+  return {
+    owned: asNumber(record.Owned, 0),
+    streak: asNumber(record.Streak, 0),
+  };
+}
+
+export function decodePointLogPage(value: unknown): PointLogPage {
+  const record = asRecord(value, 'point log response');
+  return {
+    totalPages: asNumber(record.TotalPages, 1),
+    page: asNumber(record.Page, 1),
+    data: Array.isArray(record.Data) ? record.Data.map(decodePointLogItem) : [],
+  };
+}
+
+function decodePointLogItem(value: unknown): PointLogItem {
+  const record = asRecord(value, 'point log item');
+  return {
+    source: asStringOrEmpty(record.Source),
+    amount: asNumber(record.Amount, 0),
+    balance: asNumber(record.Balance, 0),
+    refId: asNullableNumber(record.RefId),
+    occurredAt: asStringOrEmpty(record.OccurredAt),
   };
 }
 
