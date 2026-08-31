@@ -1,6 +1,6 @@
 {
   "name": "@novella/mobile",
-  "version": "2.2.2",
+  "version": "2.3.0",
   "main": "expo-router/entry",
   "dependencies": {
     "@celia-sh/react-native-pretty-toast": "1.0.2",
