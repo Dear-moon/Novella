@@ -12,6 +12,7 @@ import type { ColorValue } from 'react-native';
 import { usePlatformAppColors } from '@/hooks/use-platform-app-colors';
 import { useAppSettings } from '@/services/settings';
 import type { AppColors } from '@/theme/app-colors';
+import { resolveStringColor } from '@/theme/color-values';
 import { createHeroUIThemeVariables } from '@/theme/hero-ui-theme';
 import { resolveAppColorScheme, type AppColorScheme } from '@/theme/theme-mode';
 
@@ -91,7 +92,7 @@ export function useAppColorScheme(): AppColorScheme {
  * both appearances). Any literal string passes through unchanged.
  */
 export function resolveAccentHex(accent: ColorValue): string {
-  return typeof accent === 'string' ? accent : '#FF375F';
+  return resolveStringColor(accent, '#FF375F');
 }
 
 /**

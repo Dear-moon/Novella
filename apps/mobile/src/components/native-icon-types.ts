@@ -19,6 +19,7 @@ export type NativeIconName =
   | 'badgeTranslate'
   | 'bookDetailCache'
   | 'books'
+  | 'comicPageLayout'
   | 'cache'
   | 'changelogs'
   | 'checkIn'

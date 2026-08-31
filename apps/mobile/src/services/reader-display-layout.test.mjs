@@ -197,3 +197,34 @@ test('comic display slots group adjacent pages without changing page indexes', (
   assert.equal(resolveComicDisplayIndex(1, 3, 2), 0);
   assert.equal(resolveComicDisplayIndex(2, 3, 2), 1);
 });
+
+test('comic double-page offset leaves the opening page alone before pairing', () => {
+  const slots = createComicPageDisplaySlots([
+    { index: 0, image: null },
+    { index: 1, image: null },
+    { index: 2, image: null },
+    { index: 3, image: null },
+    { index: 4, image: null },
+  ], 2, { doublePageOffset: true });
+
+  assert.deepEqual(slots.map((slot) => slot.pages.map((page) => page.index)), [
+    [0],
+    [1, 2],
+    [3, 4],
+  ]);
+});
+
+test('comic double-page offset keeps oversized pages isolated', () => {
+  const slots = createComicPageDisplaySlots([
+    { index: 0, image: { width: 1000, height: 1500, placeholder: '', url: 'cover' } },
+    { index: 1, image: { width: 1600, height: 900, placeholder: '', url: 'wide' } },
+    { index: 2, image: { width: 1000, height: 1500, placeholder: '', url: 'c' } },
+    { index: 3, image: { width: 1000, height: 1500, placeholder: '', url: 'd' } },
+  ], 2, { doublePageOffset: true });
+
+  assert.deepEqual(slots.map((slot) => slot.pages.map((page) => page.index)), [
+    [0],
+    [1],
+    [2, 3],
+  ]);
+});

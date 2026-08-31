@@ -38,6 +38,7 @@ import {
 import { CommentThreadSkeleton } from '@/components/comment-thread-item';
 import { CommunitySectionTitle, CommunityThreadSkeleton } from '@/components/community/community-ui';
 import { NativeScreenScaffold } from '@/components/native-screen-scaffold';
+import { showAlert } from '@/components/native-alert-dialog';
 import { useCommunityThread } from '@/hooks/use-community-thread';
 import { useAppLocale } from '@/localization/localization-provider';
 import { consumeCommunityThreadChanged } from '@/services/community-reply-events';
@@ -61,6 +62,7 @@ export function CommunityThreadScreen({
   const styles = useCommunityThreadStyles();
   const { colorScheme, colors } = useAppTheme();
   const { t } = useTranslation('community');
+  const { t: tCommon } = useTranslation('common');
   const locale = useAppLocale();
   const basePaperTheme = colorScheme === 'dark' ? MD3DarkTheme : MD3LightTheme;
   // Map paper's M3 color roles onto the app theme so contained buttons,
@@ -87,6 +89,7 @@ export function CommunityThreadScreen({
   const listRef = useRef<FlatList<CommunityThreadRow>>(null);
   const hasFocused = useRef(false);
   const {
+    deleteThread,
     loadChildren,
     loadMore,
     refresh,
@@ -110,6 +113,28 @@ export function CommunityThreadScreen({
   );
 
   const thread = state.thread;
+
+  const handleDeleteThread = useCallback(() => {
+    if (!thread?.canEdit || state.threadActionId) return;
+    showAlert(
+      t('thread.deleteTitle'),
+      t('thread.deleteMessage'),
+      [
+        { style: 'cancel', text: tCommon('actions.cancel') },
+        {
+          style: 'destructive',
+          text: tCommon('actions.delete'),
+          onPress: () => {
+            void deleteThread().then((deleted) => {
+              if (!deleted) return;
+              router.replace('/community');
+            });
+          },
+        },
+      ],
+    );
+  }, [deleteThread, state.threadActionId, t, tCommon, thread]);
+
   const rows = useMemo(
     () => flattenCommunityThreadRows(thread?.replyItems ?? []),
     [thread?.replyItems],
@@ -291,7 +316,32 @@ export function CommunityThreadScreen({
       <>
         <Stack.Screen options={{ title: '' }} />
         <NativeScreenScaffold
+          actions={[
+            ...(thread?.canEdit ? [
+              {
+                accessibilityLabel: t('actions.editThread'),
+                enabled: !state.threadActionId,
+                icon: 'edit' as const,
+                id: 'edit',
+              },
+              {
+                accessibilityLabel: t('actions.deleteThread'),
+                enabled: !state.threadActionId,
+                icon: 'trash' as const,
+                id: 'delete',
+              },
+            ] : []),
+          ]}
           largeTitle={false}
+          onActionPress={(id) => {
+            if (id === 'delete') handleDeleteThread();
+            else if (id === 'edit' && thread) {
+              router.push({
+                pathname: '/thread/[id]/edit',
+                params: { id: String(thread.id) },
+              });
+            }
+          }}
           onBackPress={() => router.back()}
           showBackButton
           title=""

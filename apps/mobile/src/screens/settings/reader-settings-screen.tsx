@@ -165,6 +165,13 @@ export function ReaderSettingsContent() {
           selectedValue={settings.comicReaderViewMode}
           title={t('reader.behavior.comicModeTitle')}
         />
+        <NativeToggleRow
+          description={t('reader.behavior.comicDoublePageOffsetDescription')}
+          icon="comicPageLayout"
+          onValueChange={(value) => void updateAppSettings({ comicDoublePageOffset: value })}
+          title={t('reader.behavior.comicDoublePageOffsetTitle')}
+          value={settings.comicDoublePageOffset}
+        />
         <NativePickerRow
           description={t('reader.behavior.fontLoadModeDescription')}
           icon="textSize"

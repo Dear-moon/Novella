@@ -91,6 +91,7 @@ export const tablerNativeIcons: Record<NativeIconName, TablerNativeIcon> = {
   badgeTranslate: IconLanguage,
   bookDetailCache: IconBookDownload,
   books: IconBooks,
+  comicPageLayout: IconPhoto,
   cache: IconDatabase,
   changelogs: IconGitBranch,
   checkIn: IconCalendarCheck,

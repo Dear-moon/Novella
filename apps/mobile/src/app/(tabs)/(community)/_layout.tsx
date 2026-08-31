@@ -20,6 +20,10 @@ export default function CommunityStackLayout() {
       />
       <Stack.Screen name="thread/[id]" options={{ headerLargeTitle: false, headerShown: !isAndroid, title: '' }} />
       <Stack.Screen
+        name="thread/[id]/edit"
+        options={{ headerLargeTitle: false, headerShown: true, title: t('navigation.editPost') }}
+      />
+      <Stack.Screen
         name="thread/[id]/reply"
         options={{
           ...(isAndroid

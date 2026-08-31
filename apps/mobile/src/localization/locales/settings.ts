@@ -151,6 +151,8 @@ export const zhCNSettings = {
       novelModeDescription: '单独保存小说阅读器的滚动或分页选择',
       comicModeTitle: '漫画阅读模式',
       comicModeDescription: '单独保存漫画阅读器的滚动或分页选择',
+      comicDoublePageOffsetTitle: '漫画封面单独显示',
+      comicDoublePageOffsetDescription: '双页阅读时，开篇页面单独占一页，后续页面成对显示',
       fontLoadModeTitle: '字体加载范围',
       fontLoadModeDescription: '选择书籍字体的加载方式',
       fontLoadModeOptions: {
@@ -551,6 +553,8 @@ export const zhTWSettings: TranslationShape<typeof zhCNSettings> = {
       novelModeDescription: '單獨保存小說閱讀器的捲動或分頁選擇',
       comicModeTitle: '漫畫閱讀模式',
       comicModeDescription: '單獨保存漫畫閱讀器的捲動或分頁選擇',
+      comicDoublePageOffsetTitle: '漫畫封面單獨顯示',
+      comicDoublePageOffsetDescription: '雙頁閱讀時，開篇頁面單獨佔一頁，後續頁面成對顯示',
       fontLoadModeTitle: '字型載入範圍',
       fontLoadModeDescription: '選擇書籍字型的載入方式',
       fontLoadModeOptions: {

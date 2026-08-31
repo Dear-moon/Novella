@@ -176,8 +176,7 @@ function MyReplyCard({ reply }: { reply: CommunityMyReplyItem }) {
   const locale = useAppLocale();
   return (
     <Pressable
-      accessibilityLabel={t("accessibility.openReply", {
-        content: reply.content,
+      accessibilityLabel={t("accessibility.openThread", {
         title: reply.threadTitle,
       })}
       accessibilityRole="button"
@@ -186,7 +185,6 @@ function MyReplyCard({ reply }: { reply: CommunityMyReplyItem }) {
           pathname: "/thread/[id]",
           params: {
             id: String(reply.threadId),
-            replyId: String(reply.id),
           },
         })
       }

@@ -12,11 +12,15 @@ import {
   type CommunityListQuery,
   type CommunityMyOverview,
   type CommunityReplyChildrenPayload,
+  type CommunityReplyDeletionResult,
   type CommunityThreadDetail,
+  type CommunityThreadEditInfo,
+  type CommunityThreadMutationResult,
   type CommunityThreadReply,
   type CreateCommunityReplyRequest,
   type CreateCommunityThreadRequest,
   type GetCommunityReplyChildrenRequest,
+  type UpdateCommunityThreadRequest,
   type GetCommunityThreadRequest,
   type GetNotificationsRequest,
   type BookDetail,
@@ -204,6 +208,10 @@ export type CreateCommunityThreadInput = CreateCommunityThreadRequest & {
   contentText: string;
 };
 
+export type UpdateCommunityThreadInput = UpdateCommunityThreadRequest & {
+  contentText: string;
+};
+
 export interface CommunityUseCase {
   createReply(request: CreateCommunityReplyRequest): Promise<CommunityThreadReply>;
   createThread(request: CreateCommunityThreadInput): Promise<CommunityThreadDetail>;
@@ -218,9 +226,16 @@ export interface CommunityUseCase {
     request: GetCommunityThreadRequest,
     signal?: AbortSignal,
   ): Promise<CommunityThreadDetail | null>;
+  deleteReply(replyId: number): Promise<CommunityReplyDeletionResult>;
+  deleteThread(threadId: number): Promise<CommunityThreadMutationResult>;
+  loadThreadEditInfo(
+    threadId: number,
+    format?: 'html' | 'markdown',
+  ): Promise<CommunityThreadEditInfo>;
   toggleReplyLike(replyId: number): Promise<CommunityLikeToggleResult>;
   toggleThreadFavorite(threadId: number): Promise<CommunityFavoriteToggleResult>;
   toggleThreadLike(threadId: number): Promise<CommunityLikeToggleResult>;
+  updateThread(request: UpdateCommunityThreadInput): Promise<CommunityThreadMutationResult>;
 }
 
 export interface NotificationsUseCase {
@@ -960,6 +975,18 @@ export function createCommunityUseCase(api: ApiClient): CommunityUseCase {
       if (request.replySize !== undefined) assertPageSize(request.replySize);
       return api.getCommunityThread(request, signal ? { signal } : {});
     },
+    deleteReply(replyId: number) {
+      assertPositiveInteger(replyId, 'A valid Community reply id is required.');
+      return api.deleteCommunityReply(replyId);
+    },
+    deleteThread(threadId: number) {
+      assertPositiveInteger(threadId, 'A valid Community thread id is required.');
+      return api.deleteCommunityThread(threadId);
+    },
+    loadThreadEditInfo(threadId: number, format: 'html' | 'markdown' = 'html') {
+      assertPositiveInteger(threadId, 'A valid Community thread id is required.');
+      return api.getCommunityThreadEditInfo(threadId, format);
+    },
     toggleReplyLike(replyId: number) {
       assertPositiveInteger(replyId, 'A valid Community reply id is required.');
       return api.toggleCommunityReplyLike(replyId);
@@ -971,6 +998,25 @@ export function createCommunityUseCase(api: ApiClient): CommunityUseCase {
     toggleThreadLike(threadId: number) {
       assertPositiveInteger(threadId, 'A valid Community thread id is required.');
       return api.toggleCommunityThreadLike(threadId);
+    },
+    updateThread(request: UpdateCommunityThreadInput) {
+      assertPositiveInteger(request.threadId, 'A valid Community thread id is required.');
+      const boardKey = request.boardKey.trim();
+      const title = request.title.trim();
+      const contentText = request.contentText.trim();
+      const contentHtml = request.contentHtml.trim();
+      if (!boardKey || boardKey === 'all') throw new Error('Select a Community board.');
+      if (title.length < 6) throw new Error('The title must be at least 6 characters.');
+      if (title.length > 60) throw new Error('The title cannot exceed 60 characters.');
+      if (contentText.length < 20) throw new Error('The post must be at least 20 characters.');
+      if (!contentHtml) throw new Error('Post content is required.');
+      return api.updateCommunityThread({
+        threadId: request.threadId,
+        boardKey,
+        subCategoryKey: request.subCategoryKey?.trim() ?? '',
+        title,
+        contentHtml,
+      });
     },
   });
 }

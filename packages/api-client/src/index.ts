@@ -738,10 +738,33 @@ export interface CommunityThreadReply {
 export interface CommunityThreadDetail extends CommunityFeedItem {
   liked: boolean;
   favorited: boolean;
+  canEdit: boolean;
   bodyHtml: string;
   repliesPage: CommunityPagination;
   replyItems: CommunityThreadReply[];
   relatedThreads: CommunityFeedItem[];
+}
+
+export interface CommunityThreadEditInfo {
+  id: number;
+  boardKey: string;
+  subCategoryKey: string;
+  title: string;
+  content: string;
+  format: string;
+}
+
+export interface UpdateCommunityThreadRequest extends CreateCommunityThreadRequest {
+  threadId: number;
+}
+
+export interface CommunityThreadMutationResult {
+  id: number;
+}
+
+export interface CommunityReplyDeletionResult {
+  id: number;
+  removed: number;
 }
 
 export interface CommunityHomePayload {
@@ -1250,6 +1273,49 @@ export class ApiClient {
         ContentHtml: request.contentHtml,
       },
       decodeCommunityThreadRequired,
+    );
+  }
+
+  getCommunityThreadEditInfo(
+    threadId: number,
+    format: 'html' | 'markdown' = 'html',
+  ): Promise<CommunityThreadEditInfo> {
+    return this.invoke(
+      'GetCommunityThreadEditInfo',
+      { ThreadId: threadId, Format: format },
+      decodeCommunityThreadEditInfo,
+    );
+  }
+
+  updateCommunityThread(
+    request: UpdateCommunityThreadRequest,
+  ): Promise<CommunityThreadMutationResult> {
+    return this.invoke(
+      'UpdateCommunityThread',
+      {
+        ThreadId: request.threadId,
+        BoardKey: request.boardKey,
+        SubCategoryKey: request.subCategoryKey ?? '',
+        Title: request.title,
+        ContentHtml: request.contentHtml,
+      },
+      decodeCommunityThreadMutationResult,
+    );
+  }
+
+  deleteCommunityThread(threadId: number): Promise<CommunityThreadMutationResult> {
+    return this.invoke(
+      'DeleteCommunityThread',
+      { ThreadId: threadId },
+      decodeCommunityThreadMutationResult,
+    );
+  }
+
+  deleteCommunityReply(replyId: number): Promise<CommunityReplyDeletionResult> {
+    return this.invoke(
+      'DeleteCommunityReply',
+      { ReplyId: replyId },
+      decodeCommunityReplyDeletionResult,
     );
   }
 
@@ -1930,6 +1996,7 @@ export function decodeCommunityThreadRequired(
     ...decodeCommunityFeedItem(response),
     liked: asBoolean(response.Liked, false),
     favorited: asBoolean(response.Favorited, false),
+    canEdit: asBoolean(response.CanEdit, false),
     bodyHtml: asStringOrEmpty(response.BodyHtml),
     repliesPage: decodeCommunityPagination(response.RepliesPage),
     replyItems: decodeOptionalArray(
@@ -1942,6 +2009,37 @@ export function decodeCommunityThreadRequired(
       'related community threads',
       decodeCommunityFeedItem,
     ),
+  };
+}
+
+export function decodeCommunityThreadEditInfo(
+  value: unknown,
+): CommunityThreadEditInfo {
+  const response = asRecord(value, 'community thread edit response');
+  return {
+    id: asNumber(response.Id),
+    boardKey: asString(response.BoardKey),
+    subCategoryKey: asStringOrEmpty(response.SubCategoryKey),
+    title: asString(response.Title),
+    content: asStringOrEmpty(response.Content),
+    format: asString(response.Format),
+  };
+}
+
+export function decodeCommunityThreadMutationResult(
+  value: unknown,
+): CommunityThreadMutationResult {
+  const response = asRecord(value, 'community thread mutation response');
+  return { id: asNumber(response.Id) };
+}
+
+export function decodeCommunityReplyDeletionResult(
+  value: unknown,
+): CommunityReplyDeletionResult {
+  const response = asRecord(value, 'community reply deletion response');
+  return {
+    id: asNumber(response.Id),
+    removed: asNumber(response.Removed),
   };
 }
 
