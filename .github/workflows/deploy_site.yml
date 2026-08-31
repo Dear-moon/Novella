@@ -1,21 +1,7 @@
 name: Deploy Novella Site
 
 on:
-  push:
-    branches: ["main"]
-    paths:
-      - "apps/site/**"
-      - "README.md"
-      - "assets/screenshots_*.PNG"
-      - "package.json"
-      - "package-lock.json"
-      - "tsconfig.base.json"
-      - ".github/workflows/deploy_site.yml"
-  release:
-    types: [published]
   workflow_dispatch:
-  schedule:
-    - cron: "0 3 * * *"
 
 permissions:
   contents: read
@@ -31,11 +17,28 @@ jobs:
     timeout-minutes: 10
 
     steps:
+      - name: Verify Cloudflare credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for secret_name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+            if [ -z "${!secret_name}" ]; then
+              missing+=("$secret_name")
+            fi
+          done
+          if ((${#missing[@]} > 0)); then
+            echo "::error::Missing required Cloudflare secret(s): ${missing[*]}"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          # release 事件默认 checkout tag 的代码，需固定 main 保证部署的是最新网站。
-          ref: main
+          # Manual deployments always publish the maintained branch.
+          ref: v2.a
           fetch-depth: 1
           persist-credentials: false
 

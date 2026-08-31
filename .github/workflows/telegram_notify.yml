@@ -2,10 +2,6 @@ name: Telegram
 
 on:
   workflow_dispatch:
-  push:
-    branches: ["main"]
-  release:
-    types: [published]
 
 permissions: {}
 
@@ -133,7 +129,7 @@ jobs:
               commit_url = head.get("url") or f"{server_url}/{repo}/commit/{os.environ['SHA']}"
               commit_url = commit_url.replace(f"{server_url}/{repo}", repo_url, 1)
               lines = [
-                  "📦 *Novella main updated*",
+                  "📦 *Novella v2.a updated*",
                   f"*Repository:* `{md_code(repo_display)}`",
                   f"*Commit:* {md_link(sha, commit_url)}",
                   f"*Author:* `{md_code(author)}`",

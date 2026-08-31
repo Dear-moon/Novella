@@ -3,7 +3,7 @@ name: Build iOS IPA
 on:
   workflow_dispatch:
   pull_request:
-    branches: ["main"]
+    branches: ["v2.a"]
     paths:
       - "apps/mobile/**"
       - "packages/**"
@@ -12,7 +12,7 @@ on:
       - "tsconfig.base.json"
       - ".github/workflows/build_ios_ipa.yml"
   push:
-    branches: ["main"]
+    branches: ["v2.a"]
     tags: ["v*"]
     paths:
       - "apps/mobile/**"
@@ -51,11 +51,11 @@ jobs:
       - name: Set Build Metadata
         run: |
           set -euo pipefail
-          git fetch --no-tags origin main:refs/remotes/origin/main
+          git fetch --no-tags origin v2.a:refs/remotes/origin/v2.a
 
           RELEASE_VERSION=""
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
-            BUILD_NUMBER="$(git rev-list --count origin/main)"
+            BUILD_NUMBER="$(git rev-list --count origin/v2.a)"
             BUILD_CHANNEL="pr"
             BUILD_LABEL="PR #${{ github.event.pull_request.number }}"
             ARTIFACT_ID="pr-${{ github.event.pull_request.number }}-${GITHUB_SHA:0:7}"
@@ -69,13 +69,13 @@ jobs:
             BUILD_CHANNEL="tag"
             BUILD_LABEL="Build $BUILD_NUMBER"
             ARTIFACT_ID="$GITHUB_REF_NAME"
-          elif [ "$GITHUB_REF_NAME" = "main" ]; then
+          elif [ "$GITHUB_REF_NAME" = "v2.a" ]; then
             BUILD_NUMBER="$(git rev-list --count HEAD)"
-            BUILD_CHANNEL="main"
+            BUILD_CHANNEL="v2.a"
             BUILD_LABEL="Build $BUILD_NUMBER"
-            ARTIFACT_ID="main-${GITHUB_SHA:0:7}"
+            ARTIFACT_ID="v2.a-${GITHUB_SHA:0:7}"
           else
-            BUILD_NUMBER="$(git rev-list --count origin/main)"
+            BUILD_NUMBER="$(git rev-list --count origin/v2.a)"
             BUILD_CHANNEL="branch"
             BUILD_LABEL="$GITHUB_REF_NAME"
             SAFE_REF="${GITHUB_REF_NAME//\//-}"
@@ -95,9 +95,9 @@ jobs:
         if: github.ref_type == 'tag'
         run: |
           set -euo pipefail
-          git fetch --no-tags origin main:refs/remotes/origin/main
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
-            echo "::error::Release tag must point to a commit reachable from main."
+          git fetch --no-tags origin v2.a:refs/remotes/origin/v2.a
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/v2.a || {
+            echo "::error::Release tag must point to a commit reachable from v2.a."
             exit 1
           }
 
@@ -134,6 +134,7 @@ jobs:
           xcodebuild -showsdks | head -5
 
       - name: Install ccache
+        id: install-ccache
         run: |
           if ! command -v ccache >/dev/null 2>&1; then
             if brew tap | grep -Fxq 'aws/tap'; then
@@ -203,8 +204,8 @@ jobs:
 
       - name: Save CocoaPods cache
         # pod install 之后才保存（save 立即执行，放前面会存空目录/旧内容）。
-        # 只由 main 写入：PR 缓存存 merge-ref scope，关闭后无复用价值。
-        if: success() && github.ref == 'refs/heads/main'
+        # Only v2.a writes reusable caches; pull request caches use a short-lived merge ref.
+        if: success() && github.ref == 'refs/heads/v2.a'
         uses: actions/cache/save@v5
         with:
           path: |
@@ -229,11 +230,11 @@ jobs:
             build
 
       - name: Show ccache statistics
-        if: always()
+        if: always() && steps.install-ccache.outcome == 'success'
         run: ccache --show-stats
 
       - name: Write iOS build summary
-        if: always()
+        if: always() && steps.install-ccache.outcome == 'success'
         run: |
           STATS="$(ccache --print-stats)"
           CACHE_MISSES="$(awk '$1 == "cache_miss" { print $2 }' <<< "$STATS")"
@@ -273,9 +274,9 @@ jobs:
 
       - name: Save iOS compiler cache
         # 编译完成之后才保存（save 立即执行）。
-        # 只由 main 写入：PR 缓存存 merge-ref scope，关闭后无复用价值，
+        # Only v2.a writes reusable caches; pull request caches use a short-lived merge ref.
         # 且避免 1G 条目快速挤爆 10G 仓库缓存上限。
-        if: success() && github.ref == 'refs/heads/main'
+        if: success() && github.ref == 'refs/heads/v2.a'
         uses: actions/cache/save@v5
         with:
           path: ~/Library/Caches/ccache

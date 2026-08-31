@@ -2,8 +2,17 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
+    inputs:
+      build_type:
+        description: APK type
+        required: true
+        default: unsigned
+        type: choice
+        options:
+          - unsigned
+          - signed
   pull_request:
-    branches: ["main"]
+    branches: ["v2.a"]
     paths:
       - "apps/mobile/**"
       - "packages/**"
@@ -12,7 +21,7 @@ on:
       - "tsconfig.base.json"
       - ".github/workflows/build_android_apk.yml"
   push:
-    branches: ["main"]
+    branches: ["v2.a"]
     tags: ["v*"]
     paths:
       - "apps/mobile/**"
@@ -32,15 +41,10 @@ concurrency:
 jobs:
   build-unsigned-apk:
     name: Build Unsigned APK
-    # 第三方 PR 不可信：只出免签包，不接触签名密钥。
-    # workflow_dispatch 仅接受非 main 的 branch（选 tag 手动运行两个 job 都不成立）。
+    # Automatic events and the default manual mode never receive signing secrets.
     if: >-
-      github.event_name == 'pull_request' ||
-      (
-        github.event_name == 'workflow_dispatch' &&
-        github.ref_type == 'branch' &&
-        github.ref_name != 'main'
-      )
+      github.event_name != 'workflow_dispatch' ||
+      inputs.build_type == 'unsigned'
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -54,13 +58,27 @@ jobs:
       - name: Set Build Metadata
         run: |
           set -euo pipefail
-          git fetch --no-tags origin main:refs/remotes/origin/main
+          git fetch --no-tags origin v2.a:refs/remotes/origin/v2.a
 
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
-            BUILD_NUMBER="$(git rev-list --count origin/main)"
+            BUILD_NUMBER="$(git rev-list --count origin/v2.a)"
             BUILD_CHANNEL="pr"
             BUILD_LABEL="PR #${{ github.event.pull_request.number }}"
             ARTIFACT_ID="pr-${{ github.event.pull_request.number }}-${GITHUB_SHA:0:7}"
+          elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            if [[ ! "$GITHUB_REF_NAME" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+              echo "::error::Release tag must use vX.Y.Z format: $GITHUB_REF_NAME"
+              exit 1
+            fi
+            BUILD_NUMBER="$(git rev-list --count HEAD)"
+            BUILD_CHANNEL="tag"
+            BUILD_LABEL="Build $BUILD_NUMBER"
+            ARTIFACT_ID="$GITHUB_REF_NAME"
+          elif [ "$GITHUB_REF_NAME" = "v2.a" ]; then
+            BUILD_NUMBER="$(git rev-list --count HEAD)"
+            BUILD_CHANNEL="v2.a"
+            BUILD_LABEL="Build $BUILD_NUMBER"
+            ARTIFACT_ID="v2.a-${GITHUB_SHA:0:7}"
           else
             BUILD_NUMBER="$(git rev-list --count HEAD)"
             BUILD_CHANNEL="branch"
@@ -75,6 +93,16 @@ jobs:
             echo "APP_BUILD_LABEL=$BUILD_LABEL"
             echo "APP_ARTIFACT_ID=$ARTIFACT_ID"
           } >> "$GITHUB_ENV"
+
+      - name: Verify release tag target
+        if: github.ref_type == 'tag'
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin v2.a:refs/remotes/origin/v2.a
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/v2.a || {
+            echo "::error::Release tag must point to a commit reachable from v2.a."
+            exit 1
+          }
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -142,22 +170,33 @@ jobs:
 
   build-signed-apk:
     name: Build Signed APK
-    # 仅官方通道签名：push 到 main，或打 vX.Y.Z 发布 tag；
-    # workflow_dispatch 仅接受 main（选 tag 或功能分支手动运行均不签名）。
+    # Signed builds run only when explicitly selected in a manual dispatch.
     if: >-
-      (
-        github.event_name == 'push' &&
-        (github.ref_name == 'main' || github.ref_type == 'tag')
-      ) ||
-      (
-        github.event_name == 'workflow_dispatch' &&
-        github.ref_type == 'branch' &&
-        github.ref_name == 'main'
-      )
+      github.event_name == 'workflow_dispatch' &&
+      inputs.build_type == 'signed'
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
     steps:
+      - name: Verify signing secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for secret_name in KEYSTORE_BASE64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!secret_name}" ]; then
+              missing+=("$secret_name")
+            fi
+          done
+          if ((${#missing[@]} > 0)); then
+            echo "::error::Missing required signing secret(s): ${missing[*]}"
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v7
         with:
@@ -167,7 +206,7 @@ jobs:
       - name: Set Build Metadata
         run: |
           set -euo pipefail
-          git fetch --no-tags origin main:refs/remotes/origin/main
+          git fetch --no-tags origin v2.a:refs/remotes/origin/v2.a
 
           RELEASE_VERSION=""
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
@@ -178,11 +217,11 @@ jobs:
             RELEASE_VERSION="${BASH_REMATCH[1]}"
             BUILD_NUMBER="$(git rev-list --count HEAD)"
             BUILD_CHANNEL="tag"
-          elif [ "$GITHUB_REF_NAME" = "main" ]; then
+          elif [ "$GITHUB_REF_NAME" = "v2.a" ]; then
             BUILD_NUMBER="$(git rev-list --count HEAD)"
-            BUILD_CHANNEL="main"
+            BUILD_CHANNEL="v2.a"
           else
-            BUILD_NUMBER="$(git rev-list --count origin/main)"
+            BUILD_NUMBER="$(git rev-list --count origin/v2.a)"
             BUILD_CHANNEL="branch"
           fi
           BUILD_LABEL="Build $BUILD_NUMBER"
@@ -195,13 +234,13 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Verify release tag target
-        # tag push 会用正式签名 secrets，先确认 tag 指向的提交来自 main。
+        # Manual tag builds must come from the maintained branch before using secrets.
         if: github.ref_type == 'tag'
         run: |
           set -euo pipefail
-          git fetch --no-tags origin main:refs/remotes/origin/main
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
-            echo "::error::Release tag must point to a commit reachable from main."
+          git fetch --no-tags origin v2.a:refs/remotes/origin/v2.a
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/v2.a || {
+            echo "::error::Release tag must point to a commit reachable from v2.a."
             exit 1
           }
 
@@ -239,10 +278,6 @@ jobs:
           ENCODED_STRING: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
           set -euo pipefail
-          if [ -z "$ENCODED_STRING" ]; then
-            echo "::error::Missing KEYSTORE_BASE64 secret for signed build."
-            exit 1
-          fi
           printf '%s' "$ENCODED_STRING" | base64 --decode > apps/mobile/android/app/release.keystore
           test -s apps/mobile/android/app/release.keystore
 
