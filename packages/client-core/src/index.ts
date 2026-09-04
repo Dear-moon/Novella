@@ -50,6 +50,7 @@ import {
   type ShopMyItems,
   type SignInCalendar,
   type SignMakeupCardResult,
+  type UseComicQuotaCardResult,
   type UserProfile,
 } from '@novella/api-client';
 import type {
@@ -301,6 +302,7 @@ export interface PointsUseCase {
   getSignInCalendar(year: number, month: number): Promise<SignInCalendar>;
   getMakeupCardCount(): Promise<number>;
   useSignMakeupCard(date: string): Promise<SignMakeupCardResult>;
+  useComicQuotaCard(): Promise<UseComicQuotaCardResult>;
   getPointLog(kind: PointLogKind, page: number, size: number): Promise<PointLogPage>;
   getShop(): Promise<ShopInfo>;
   getMyItems(): Promise<ShopMyItems>;
@@ -1149,6 +1151,9 @@ export function createPointsUseCase(api: ApiClient): PointsUseCase {
     },
     useSignMakeupCard(date: string) {
       return api.useSignMakeupCard(date);
+    },
+    useComicQuotaCard() {
+      return api.useComicQuotaCard();
     },
     getPointLog(kind: PointLogKind, page: number, size: number) {
       return kind === 'coin' ? api.getCoinLog(page, size) : api.getPointLog(page, size);

@@ -586,7 +586,7 @@ export interface ShopItem {
   image: string;
   price: number;
   owned: number;
-  monthlyLimit: number;
+  monthlyLimit: number | null;
   monthlyPurchased: number;
 }
 
@@ -606,6 +606,13 @@ export interface BuyShopItemResult {
 export interface SignMakeupCardResult {
   owned: number;
   streak: number;
+}
+
+export interface UseComicQuotaCardResult {
+  key: string;
+  granted: number;
+  quota: number;
+  owned: number;
 }
 
 export interface PointLogItem {
@@ -1523,6 +1530,10 @@ export class ApiClient {
     return this.invoke('UseSignMakeupCard', { Date: date }, decodeSignMakeupCardResult);
   }
 
+  useComicQuotaCard(): Promise<UseComicQuotaCardResult> {
+    return this.invoke('UseComicQuotaCard', {}, decodeUseComicQuotaCardResult);
+  }
+
   getPointLog(page: number, size: number): Promise<PointLogPage> {
     return this.invoke('GetPointLog', { Page: page, Size: size }, decodePointLogPage);
   }
@@ -1805,7 +1816,7 @@ function decodeShopItem(value: unknown): ShopItem {
     image: asStringOrEmpty(record.Image),
     price: asNumber(record.Price, 0),
     owned: asNumber(record.Owned, 0),
-    monthlyLimit: asNumber(record.MonthlyLimit, 0),
+    monthlyLimit: asNullableNumber(record.MonthlyLimit),
     monthlyPurchased: asNumber(record.MonthlyPurchased, 0),
   };
 }
@@ -1826,6 +1837,16 @@ export function decodeSignMakeupCardResult(value: unknown): SignMakeupCardResult
   return {
     owned: asNumber(record.Owned, 0),
     streak: asNumber(record.Streak, 0),
+  };
+}
+
+export function decodeUseComicQuotaCardResult(value: unknown): UseComicQuotaCardResult {
+  const record = asRecord(value, 'comic quota card response');
+  return {
+    key: asStringOrEmpty(record.Key),
+    granted: asNumber(record.Granted, 0),
+    quota: asNumber(record.Quota, 0),
+    owned: asNumber(record.Owned, 0),
   };
 }
 

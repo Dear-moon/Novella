@@ -1109,7 +1109,7 @@ test('maps sign calendar, makeup cards, and point logs to Web-Master Hub contrac
   ]);
 });
 
-test('maps shop shelf, owned items, and purchase to Web-Master Hub contracts', async () => {
+test('maps shop shelf, owned items, purchase, and quota use to Web-Master Hub contracts', async () => {
   const calls = [];
   const client = new ApiClient(
     { async request() { throw new Error('not used'); } },
@@ -1119,13 +1119,19 @@ test('maps shop shelf, owned items, and purchase to Web-Master Hub contracts', a
       async invoke(method, args) {
         calls.push({ method, args });
         if (method === 'GetShop') {
-          return { Success: true, Response: { Coin: 120, Items: [{ Key: 'sign_makeup', Name: '补签卡', Description: '补签', Image: '/img/makeup.png', Price: 100, Owned: 2, MonthlyLimit: 3, MonthlyPurchased: 1 }] } };
+          return { Success: true, Response: { Coin: 120, Items: [
+            { Key: 'sign_makeup', Name: '补签卡', Description: '补签', Image: '/img/makeup.png', Price: 100, Owned: 2, MonthlyLimit: 3, MonthlyPurchased: 1 },
+            { Key: 'comic_quota_50', Name: '漫画额度卡', Description: '获得漫画额度', Image: '/img/quota.png', Price: 50, Owned: 1, MonthlyPurchased: 0 },
+          ] } };
         }
         if (method === 'GetMyItems') {
           return { Success: true, Response: { Items: [{ Key: 'sign_makeup', Name: '补签卡', Description: '补签', Image: '/img/makeup.png', Quantity: 2 }] } };
         }
         if (method === 'BuyShopItem') {
           return { Success: true, Response: { Key: 'sign_makeup', Owned: 3, Coin: 20, Cost: 100, MonthlyPurchased: 2 } };
+        }
+        if (method === 'UseComicQuotaCard') {
+          return { Success: true, Response: { Key: 'comic_quota_50', Granted: 50, Quota: 75, Owned: 0 } };
         }
         return { Success: true, Response: null };
       },
@@ -1136,7 +1142,10 @@ test('maps shop shelf, owned items, and purchase to Web-Master Hub contracts', a
 
   assert.deepEqual(await client.getShop(), {
     coin: 120,
-    items: [{ key: 'sign_makeup', name: '补签卡', description: '补签', image: '/img/makeup.png', price: 100, owned: 2, monthlyLimit: 3, monthlyPurchased: 1 }],
+    items: [
+      { key: 'sign_makeup', name: '补签卡', description: '补签', image: '/img/makeup.png', price: 100, owned: 2, monthlyLimit: 3, monthlyPurchased: 1 },
+      { key: 'comic_quota_50', name: '漫画额度卡', description: '获得漫画额度', image: '/img/quota.png', price: 50, owned: 1, monthlyLimit: null, monthlyPurchased: 0 },
+    ],
   });
   assert.deepEqual(await client.getMyItems(), {
     items: [{ key: 'sign_makeup', name: '补签卡', description: '补签', image: '/img/makeup.png', quantity: 2 }],
@@ -1148,10 +1157,17 @@ test('maps shop shelf, owned items, and purchase to Web-Master Hub contracts', a
     cost: 100,
     monthlyPurchased: 2,
   });
+  assert.deepEqual(await client.useComicQuotaCard(), {
+    key: 'comic_quota_50',
+    granted: 50,
+    quota: 75,
+    owned: 0,
+  });
 
   assert.deepEqual(calls, [
     { method: 'GetShop', args: [{}, { UseGzip: true }] },
     { method: 'GetMyItems', args: [{}, { UseGzip: true }] },
     { method: 'BuyShopItem', args: [{ Key: 'sign_makeup', Quantity: 1 }, { UseGzip: true }] },
+    { method: 'UseComicQuotaCard', args: [{}, { UseGzip: true }] },
   ]);
 });

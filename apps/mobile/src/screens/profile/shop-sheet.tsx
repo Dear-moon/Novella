@@ -11,6 +11,7 @@ import { points, type ShopItem, type ShopOwnedItem } from '@/services/client';
 import { useAppTheme } from '@/theme/app-theme';
 
 const SIGN_MAKEUP_KEY = 'sign_makeup';
+const COMIC_QUOTA_50_KEY = 'comic_quota_50';
 
 /** Shop images are relative paths; the API serves them from its own origin. */
 function resolveItemImage(url: string): string {
@@ -26,6 +27,7 @@ export function ShopSheet() {
   const [coin, setCoin] = useState(0);
   const [loading, setLoading] = useState(true);
   const [buyingKey, setBuyingKey] = useState<string | null>(null);
+  const [usingQuota, setUsingQuota] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -46,7 +48,9 @@ export function ShopSheet() {
   }, [load]);
 
   const remaining = useCallback((item: ShopItem) =>
-    Math.max(0, item.monthlyLimit - item.monthlyPurchased), []);
+    item.monthlyLimit === null
+      ? Infinity
+      : Math.max(0, item.monthlyLimit - item.monthlyPurchased), []);
 
   const buy = useCallback(async (item: ShopItem) => {
     setBuyingKey(item.key);
@@ -76,6 +80,34 @@ export function ShopSheet() {
       ],
     );
   }, [buy, buyingKey, remaining, t]);
+
+  const useQuota = useCallback(async () => {
+    setUsingQuota(true);
+    try {
+      const result = await points.useComicQuotaCard();
+      showAlert(
+        t('profile.shop.useQuotaSuccessTitle'),
+        t('profile.shop.useQuotaSuccessMessage', { granted: result.granted, quota: result.quota }),
+      );
+      await load();
+    } catch (error) {
+      showAlert(t('profile.shop.useQuotaFailedTitle'), error instanceof Error ? error.message : '');
+    } finally {
+      setUsingQuota(false);
+    }
+  }, [load, t]);
+
+  const confirmUseQuota = useCallback(() => {
+    if (usingQuota) return;
+    showAlert(
+      t('profile.shop.useQuotaConfirmTitle'),
+      t('profile.shop.useQuotaConfirmMessage'),
+      [
+        { text: t('profile.shop.buyConfirmCancel'), style: 'cancel' },
+        { text: t('profile.shop.use'), onPress: () => void useQuota() },
+      ],
+    );
+  }, [t, useQuota, usingQuota]);
 
   const numberLabel = useCallback((value: number) => new Intl.NumberFormat(locale).format(value), [locale]);
 
@@ -108,13 +140,19 @@ export function ShopSheet() {
                 <Text
                   style={[styles.buyButtonText, { color: !buyable ? colors.secondaryLabel as string : colors.surface as string }]}
                 >
-                  {buyable ? t('profile.shop.buy') : t('profile.shop.monthlyLimitReached')}
+                  {buyable
+                    ? t('profile.shop.buy')
+                    : item.monthlyLimit === 0
+                      ? t('profile.shop.unavailable')
+                      : t('profile.shop.monthlyLimitReached')}
                 </Text>
               )}
             </Pressable>
           </View>
           <Text style={[styles.itemOwned, { color: colors.secondaryLabel as string }]}>
-            {t('profile.shop.owned', { count: item.owned })} · {t('profile.shop.remaining', { count: remaining(item), limit: item.monthlyLimit })}
+            {t('profile.shop.owned', { count: item.owned })} · {item.monthlyLimit === null
+              ? t('profile.shop.unlimited')
+              : t('profile.shop.remaining', { count: remaining(item), limit: item.monthlyLimit })}
           </Text>
         </View>
       </View>
@@ -173,9 +211,23 @@ export function ShopSheet() {
                       <Pressable
                         accessibilityRole="button"
                         onPress={() => router.push('/settings/check-in-calendar')}
-                        style={[styles.makeupButton, { borderColor: colors.accent as string }]}
+                        style={[styles.itemActionButton, { borderColor: colors.accent as string }]}
                       >
-                        <Text style={[styles.makeupText, { color: colors.accent as string }]}>{t('profile.shop.goMakeUp')}</Text>
+                        <Text style={[styles.itemActionText, { color: colors.accent as string }]}>{t('profile.shop.goMakeUp')}</Text>
+                      </Pressable>
+                    ) : null}
+                    {item.key === COMIC_QUOTA_50_KEY ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        disabled={usingQuota}
+                        onPress={confirmUseQuota}
+                        style={[styles.itemActionButton, { borderColor: colors.accent as string }]}
+                      >
+                        {usingQuota ? (
+                          <ActivityIndicator color={colors.accent as string} size="small" />
+                        ) : (
+                          <Text style={[styles.itemActionText, { color: colors.accent as string }]}>{t('profile.shop.use')}</Text>
+                        )}
                       </Pressable>
                     ) : null}
                   </View>
@@ -229,7 +281,7 @@ const styles = StyleSheet.create({
   ownedImage: { borderRadius: 8, height: 48, width: 48 },
   ownedBody: { flex: 1 },
   ownedSide: { alignItems: 'flex-end', gap: 6 },
-  makeupButton: { borderRadius: 14, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 5 },
-  makeupText: { fontSize: 12, fontWeight: '600' },
+  itemActionButton: { borderRadius: 14, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 5 },
+  itemActionText: { fontSize: 12, fontWeight: '600' },
   empty: { fontSize: 13, paddingVertical: 24, textAlign: 'center' },
 });
