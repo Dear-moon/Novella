@@ -33,7 +33,12 @@ export const zhCNCommon = {
     sessionExpiredTitle: '登录状态已过期',
     sessionExpiredMessage: '请重新登录后继续使用 Novella。',
   },
-  states: {
+  realtime: {
+    growthUpdateTitle: '成长更新',
+    experienceDelta: '经验 {{value}}',
+    coinDelta: '金币 {{value}}',
+ },
+ states: {
     loading: '正在加载',
     unknownError: '操作失败，请重试。',
     unavailable: '暂不可用',
@@ -71,9 +76,14 @@ export const zhTWCommon: TranslationShape<typeof zhCNCommon> = {
     reconnectedTitle: '連線已恢復',
     reconnectedMessage: '可以繼續閱讀了。',
     sessionExpiredTitle: '登入狀態已過期',
-    sessionExpiredMessage: '請重新登入後繼續使用 Novella。',
+   sessionExpiredMessage: '請重新登入後繼續使用 Novella。',
+ },
+  realtime: {
+    growthUpdateTitle: '成長更新',
+    experienceDelta: '經驗 {{value}}',
+    coinDelta: '金幣 {{value}}',
   },
-  states: {
+ states: {
     loading: '正在載入',
     unknownError: '操作失敗，請重試。',
     unavailable: '暫時無法使用',

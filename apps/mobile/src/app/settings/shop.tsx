@@ -1,10 +1,5 @@
-import { NativeRouteBottomSheet } from '@/components/native-route-bottom-sheet';
-import { ShopSheet } from '@/screens/profile/shop-sheet';
+import { ShopSettingsScreen } from '@/screens/shop-settings-screen';
 
-export default function ShopRoute() {
-  return (
-    <NativeRouteBottomSheet snapPoints={['50%', '100%']}>
-      <ShopSheet />
-    </NativeRouteBottomSheet>
-  );
+export default function ShopSettingsRoute() {
+  return <ShopSettingsScreen />;
 }

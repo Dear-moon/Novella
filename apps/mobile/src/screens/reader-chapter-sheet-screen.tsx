@@ -42,7 +42,7 @@ export function ReaderChapterSheetScreen() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      setSource(kind === 'Comic' ? await reader.loadComicInfo(bookId) : await bookDetails.load(bookId));
+      setSource(await bookDetails.load(bookId));
     } catch (cause) {
       setError(getChapterSheetMessage(cause));
     }

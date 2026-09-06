@@ -1,4 +1,4 @@
-import { ApiClient } from '@novella/api-client';
+﻿import { ApiClient } from '@novella/api-client';
 import {
   AUTH_CREDENTIAL_KEYS,
   createAnnouncementsUseCase,
@@ -12,9 +12,11 @@ import {
   createDiscoveryUseCase,
   createHistoryUseCase,
   createNotificationsUseCase,
-  createPointsUseCase,
+  createPointLogUseCase,
   createProfileUseCase,
+  createPublicProfileUseCase,
   createReaderUseCase,
+  createShopUseCase,
   createShelfUseCase,
   type AnnouncementsUseCase,
   type AuthenticationUseCase,
@@ -26,9 +28,11 @@ import {
   type DiscoveryUseCase,
   type HistoryUseCase,
   type NotificationsUseCase,
-  type PointsUseCase,
+  type PointLogUseCase,
   type ProfileUseCase,
+  type PublicProfileUseCase,
   type ReaderUseCase,
+  type ShopUseCase,
   type ShelfUseCase,
 } from '@novella/client-core';
 
@@ -76,10 +80,12 @@ export const bookSearch: BookSearchUseCase = createBookSearchUseCase(api);
 export const comments: CommentsUseCase = createCommentsUseCase(api);
 export const community: CommunityUseCase = createCommunityUseCase(api);
 export const notifications: NotificationsUseCase = createNotificationsUseCase(api);
+export const pointLogs: PointLogUseCase = createPointLogUseCase(api);
 export const history: HistoryUseCase = createHistoryUseCase(api);
 export const profile: ProfileUseCase = createProfileUseCase(api);
-export const points: PointsUseCase = createPointsUseCase(api);
+export const publicProfiles: PublicProfileUseCase = createPublicProfileUseCase(api);
 export const reader: ReaderUseCase = createReaderUseCase(api);
+export const shop: ShopUseCase = createShopUseCase(api);
 export const shelf: ShelfUseCase = createShelfUseCase(api);
 authentication = createAuthenticationUseCase(
   api,
@@ -87,21 +93,13 @@ authentication = createAuthenticationUseCase(
   credentials,
   signalR,
 );
+authentication.subscribe(({ status }) => {
+  if (status === 'signingIn' || status === 'registering' || status === 'signedOut') {
+    shop.reset();
+  }
+});
 
 export { authentication, storage };
-
-export type { PointLogKind } from '@novella/client-core';
-export type {
-  BuyShopItemResult,
-  PointLogItem,
-  PointLogPage,
-  ShopInfo,
-  ShopItem,
-  ShopMyItems,
-  ShopOwnedItem,
-  SignInCalendar,
-  SignMakeupCardResult,
-} from '@novella/api-client';
 
 /**
  * Local-only probe of whether a session was ever stored. Resolves fast (no
@@ -140,6 +138,13 @@ export function subscribeClientLifecycle(
   listener: (state: 'background' | 'foreground') => void,
 ) {
   return lifecycle.subscribe(listener);
+}
+
+export function subscribeClientRealtime(
+  methodName: string,
+  listener: (payload: unknown) => void,
+) {
+  return session.transport.subscribe(methodName, listener);
 }
 
 export async function closeClient(): Promise<void> {

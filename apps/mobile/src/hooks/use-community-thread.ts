@@ -274,6 +274,28 @@ export function useCommunityThread({
     }
   }, [state.thread, state.threadActionId, t]);
 
+  const toggleThreadLocked = useCallback(async () => {
+    const thread = state.thread;
+    if (!thread?.canEdit || state.threadActionId) return false;
+    const locked = !thread.locked;
+    setState((current) => ({ ...current, threadActionId: 'thread-lock', error: null }));
+    try {
+      const result = await community.setThreadLocked(thread.id, locked);
+      setState((current) => current.thread ? ({
+        ...current,
+        threadActionId: null,
+        thread: { ...current.thread, locked: result.locked },
+      }) : current);
+      return true;
+    } catch (error) {
+      setState((current) => ({
+        ...current,
+        threadActionId: null,
+        error: error instanceof Error ? error.message : t('thread.errors.updateLock'),
+      }));
+      return false;
+    }
+  }, [state.thread, state.threadActionId, t]);
   const deleteReply = useCallback(async (replyId: number) => {
     if (!state.thread || replyOperationRef.current !== null) return false;
     const actionId = `reply-delete:${replyId}`;
@@ -391,6 +413,7 @@ export function useCommunityThread({
     state,
     toggleReplyLike,
     toggleThreadFavorite,
-    toggleThreadLike,
-  };
+   toggleThreadLike,
+    toggleThreadLocked,
+ };
 }

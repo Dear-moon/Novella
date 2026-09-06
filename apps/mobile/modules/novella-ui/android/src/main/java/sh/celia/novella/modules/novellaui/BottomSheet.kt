@@ -137,7 +137,6 @@ fun FunctionalComposableScope.BottomSheetContent(
       }
     }
   }
-
   LaunchedEffect(state, props.supportsPartialExpansion) {
     if (props.supportsPartialExpansion) {
       state.partialExpand()

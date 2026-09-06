@@ -8,7 +8,7 @@ import {
   IconRefresh,
 } from '@tabler/icons-react-native';
 import { router, Stack, useFocusEffect } from 'expo-router';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ReactNode } from 'react';
 import {
@@ -20,7 +20,6 @@ import {
   View,
 } from 'react-native';
 import {
-  Avatar,
   Button,
   MD3DarkTheme,
   MD3LightTheme,
@@ -31,14 +30,15 @@ import {
 import type { CommunityThreadReply } from '@novella/api-client';
 
 import { CommunityHtmlContent } from '@/components/community/community-html-content';
+import { PublicUserAvatar } from '@/components/public-user-avatar';
+import { CommunityThreadNavigation } from '@/components/community/community-navigation';
+import { showAlert } from '@/components/native-alert-dialog';
 import {
   CommentThreadRow,
   type CommentThreadPalette,
 } from '@/components/comment-thread';
 import { CommentThreadSkeleton } from '@/components/comment-thread-item';
 import { CommunitySectionTitle, CommunityThreadSkeleton } from '@/components/community/community-ui';
-import { NativeScreenScaffold } from '@/components/native-screen-scaffold';
-import { showAlert } from '@/components/native-alert-dialog';
 import { useCommunityThread } from '@/hooks/use-community-thread';
 import { useAppLocale } from '@/localization/localization-provider';
 import { consumeCommunityThreadChanged } from '@/services/community-reply-events';
@@ -49,6 +49,7 @@ import {
   type CommunityThreadRow,
 } from '@/services/community-thread-rows';
 import { createThemedStyles, resolveAccentHex, resolveOnAccentHex, useAppTheme } from '@/theme/app-theme';
+import { resolveStringColor } from '@/theme/color-values';
 
 export function CommunityThreadScreen({
   parentReplyId,
@@ -65,16 +66,14 @@ export function CommunityThreadScreen({
   const { t: tCommon } = useTranslation('common');
   const locale = useAppLocale();
   const basePaperTheme = colorScheme === 'dark' ? MD3DarkTheme : MD3LightTheme;
-  // Map paper's M3 color roles onto the app theme so contained buttons,
-  // contained-tonal (selected) buttons and the reply input's focus outline
-  // use the app accent instead of the library default purple. Paper's color
-  // parser can't resolve PlatformColor objects, so resolve iOS's semantic
-  // colors to their stable hex equivalents (systemPink is the same in both
-  // appearances); Android's Material palette is already hex strings.
+  // Map Paper's M3 color roles onto the app theme so contained buttons and
+  // selected buttons use the app accent instead of the library default purple.
+  // Paper's color parser cannot resolve iOS PlatformColor objects, so every
+  // explicit Paper color must remain a literal string.
   const accentHex = resolveAccentHex(colors.accent);
-  const primaryContainerHex = resolveAccentHex(colors.primaryContainer);
-  const onPrimaryContainerHex = resolveAccentHex(colors.onPrimaryContainer);
   const onPrimaryHex = resolveOnAccentHex(colors.accent);
+  const primaryContainerHex = resolveStringColor(colors.primaryContainer, accentHex);
+  const onPrimaryContainerHex = resolveStringColor(colors.onPrimaryContainer, onPrimaryHex);
   const paperTheme = useMemo(() => ({
     ...basePaperTheme,
     colors: {
@@ -89,6 +88,7 @@ export function CommunityThreadScreen({
   const listRef = useRef<FlatList<CommunityThreadRow>>(null);
   const hasFocused = useRef(false);
   const {
+    deleteReply,
     deleteThread,
     loadChildren,
     loadMore,
@@ -98,6 +98,7 @@ export function CommunityThreadScreen({
     toggleReplyLike,
     toggleThreadFavorite,
     toggleThreadLike,
+    toggleThreadLocked,
   } = useCommunityThread({ parentReplyId, replyId, threadId });
 
   // Refresh only when a reply was actually posted from the composer bottom
@@ -113,6 +114,19 @@ export function CommunityThreadScreen({
   );
 
   const thread = state.thread;
+  const rows = useMemo(
+    () => flattenCommunityThreadRows(thread?.replyItems ?? []),
+    [thread?.replyItems],
+  );
+
+  useEffect(() => {
+    if (!state.highlightedReplyId) return;
+    const index = findCommunityThreadRowIndex(rows, state.highlightedReplyId);
+    if (index >= 0) {
+      setTimeout(() => listRef.current?.scrollToIndex({ animated: true, index, viewPosition: 0.2 }), 100);
+    }
+  }, [rows, state.highlightedReplyId]);
+  const canReply = Boolean(thread && !thread.locked);
 
   const handleDeleteThread = useCallback(() => {
     if (!thread?.canEdit || state.threadActionId) return;
@@ -135,19 +149,40 @@ export function CommunityThreadScreen({
     );
   }, [deleteThread, state.threadActionId, t, tCommon, thread]);
 
-  const rows = useMemo(
-    () => flattenCommunityThreadRows(thread?.replyItems ?? []),
-    [thread?.replyItems],
-  );
+  const handleToggleLocked = useCallback(() => {
+    if (!thread?.canEdit || state.threadActionId) return;
+    showAlert(
+      thread.locked ? t('thread.unlockTitle') : t('thread.lockTitle'),
+      thread.locked ? t('thread.unlockMessage') : t('thread.lockMessage'),
+      [
+        { style: 'cancel', text: tCommon('actions.cancel') },
+        {
+          text: thread.locked ? t('actions.unlockThread') : t('actions.lockThread'),
+          onPress: () => void toggleThreadLocked(),
+        },
+      ],
+    );
+  }, [state.threadActionId, t, tCommon, thread, toggleThreadLocked]);
 
-  useEffect(() => {
-    if (!state.highlightedReplyId) return;
-    const index = findCommunityThreadRowIndex(rows, state.highlightedReplyId);
-    if (index >= 0) {
-      setTimeout(() => listRef.current?.scrollToIndex({ animated: true, index, viewPosition: 0.2 }), 100);
-    }
-  }, [rows, state.highlightedReplyId]);
-  const canReply = Boolean(thread && !thread.locked);
+  const handleDeleteReply = useCallback((reply: CommunityThreadReply) => {
+    if (!reply.canDelete || state.actionId) return;
+    showAlert(
+      t('thread.deleteReplyTitle'),
+      t('thread.deleteReplyMessage'),
+      [
+        { style: 'cancel', text: tCommon('actions.cancel') },
+        {
+          style: 'destructive',
+          text: tCommon('actions.delete'),
+          onPress: () => {
+            void deleteReply(reply.id).then((deleted) => {
+              if (deleted) showAlert(t('thread.deleteSuccessTitle'), t('thread.replyDeleted'));
+            });
+          },
+        },
+      ],
+    );
+  }, [deleteReply, state.actionId, t, tCommon]);
 
   const openReply = useCallback((reply: CommunityThreadReply | null) => {
     if (!canReply) return;
@@ -178,6 +213,7 @@ export function CommunityThreadScreen({
         highlightedReplyId={state.highlightedReplyId}
         onLike={handleReplyLike}
         onLoadChildren={handleLoadChildren}
+        onDelete={handleDeleteReply}
         onReply={openReply}
         palette={commentPalette}
         row={item}
@@ -188,6 +224,7 @@ export function CommunityThreadScreen({
       commentPalette,
       handleLoadChildren,
       handleReplyLike,
+      handleDeleteReply,
       openReply,
       state.actionId,
       state.highlightedReplyId,
@@ -205,20 +242,26 @@ export function CommunityThreadScreen({
         <View style={styles.postBody}>
           <Text style={styles.title}>{thread.title}</Text>
           <View style={styles.authorRow}>
-            <ThreadAvatar
+            <PublicUserAvatar
               avatarUrl={thread.authorAvatar}
-              name={thread.authorIsDeleted ? t('labels.deletedUser') : thread.authorName || t('labels.unknownUser')}
               size={38}
+              userId={thread.authorIsDeleted ? 0 : thread.authorId}
+              userName={thread.authorIsDeleted ? t('labels.deletedUser') : thread.authorName || t('labels.unknownUser')}
             />
             <View style={styles.authorCopy}>
               <Text style={styles.authorName}>
                 {thread.authorIsDeleted ? t('labels.deletedUser') : thread.authorName || t('labels.unknownUser')}
               </Text>
-              <Text style={styles.time}>{formatCommunityTime(thread.publishedAt, locale)}</Text>
+              <Text style={styles.time}>
+                {formatCommunityTime(thread.publishedAt, locale)}
+                {thread.editedAt
+                  ? ` · ${t('thread.edited')} ${formatCommunityTime(thread.editedAt, locale)}`
+                  : ''}
+              </Text>
             </View>
           </View>
           <View style={styles.html}>
-            <CommunityHtmlContent html={thread.bodyHtml} />
+            <CommunityHtmlContent html={thread.content} />
           </View>
         </View>
         <View style={styles.actions}>
@@ -315,37 +358,19 @@ export function CommunityThreadScreen({
     <PaperProvider theme={paperTheme}>
       <>
         <Stack.Screen options={{ title: '' }} />
-        <NativeScreenScaffold
-          actions={[
-            ...(thread?.canEdit ? [
-              {
-                accessibilityLabel: t('actions.editThread'),
-                enabled: !state.threadActionId,
-                icon: 'edit' as const,
-                id: 'edit',
-              },
-              {
-                accessibilityLabel: t('actions.deleteThread'),
-                enabled: !state.threadActionId,
-                icon: 'trash' as const,
-                id: 'delete',
-              },
-            ] : []),
-          ]}
-          largeTitle={false}
-          onActionPress={(id) => {
-            if (id === 'delete') handleDeleteThread();
-            else if (id === 'edit' && thread) {
-              router.push({
-                pathname: '/thread/[id]/edit',
-                params: { id: String(thread.id) },
-              });
-            }
-          }}
-          onBackPress={() => router.back()}
-          showBackButton
-          title=""
-        >
+        {thread?.canEdit ? (
+          <CommunityThreadNavigation
+            disabled={state.threadActionId !== null}
+            locked={thread.locked}
+            onDelete={handleDeleteThread}
+            onEdit={() => router.push({
+              pathname: '/thread/[id]/edit',
+              params: { id: String(thread.id) },
+            })}
+            onToggleLocked={handleToggleLocked}
+          />
+        ) : null}
+
           <FlatList
             style={styles.root}
             ListEmptyComponent={
@@ -393,13 +418,12 @@ export function CommunityThreadScreen({
                 tintColor={colors.accent}
               />
             }
-            removeClippedSubviews={process.env.EXPO_OS === 'android'}
             renderItem={renderReply}
             showsVerticalScrollIndicator={false}
             updateCellsBatchingPeriod={32}
             windowSize={7}
           />
-        </NativeScreenScaffold>
+
       </>
     </PaperProvider>
   );
@@ -425,42 +449,6 @@ function ThreadTagPill({ label, variant }: { label: string; variant: 'accent' | 
         {label}
       </Text>
     </View>
-  );
-}
-
-function ThreadAvatar({
-  avatarUrl,
-  name,
-  size,
-}: {
-  avatarUrl: string;
-  name: string;
-  size: number;
-}) {
-  const styles = useCommunityThreadStyles();
-  const { colors } = useAppTheme();
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [avatarUrl]);
-  const initial = name.trim().slice(0, 1).toUpperCase() || '?';
-
-  if (avatarUrl.trim() && !failed) {
-    return (
-      <Avatar.Image
-        onError={() => setFailed(true)}
-        size={size}
-        source={{ uri: avatarUrl.trim() }}
-        style={[styles.avatar, { backgroundColor: colors.surfaceContainerHighest }]}
-      />
-    );
-  }
-  return (
-    <Avatar.Text
-      color={colors.label as string}
-      label={initial}
-      labelStyle={styles.avatarLabel}
-      size={size}
-      style={[styles.avatar, { backgroundColor: colors.surfaceContainerHighest }]}
-    />
   );
 }
 
@@ -564,6 +552,7 @@ const ThreadReplyRow = memo(function ThreadReplyRow({
   highlightedReplyId,
   onLike,
   onLoadChildren,
+  onDelete,
   onReply,
   palette,
   row,
@@ -573,6 +562,7 @@ const ThreadReplyRow = memo(function ThreadReplyRow({
   highlightedReplyId: number | null;
   onLike(reply: CommunityThreadReply): void;
   onLoadChildren(reply: CommunityThreadReply): void;
+  onDelete(reply: CommunityThreadReply): void;
   onReply(reply: CommunityThreadReply): void;
   palette: CommentThreadPalette;
   row: CommunityThreadRow;
@@ -626,6 +616,7 @@ const ThreadReplyRow = memo(function ThreadReplyRow({
         avatarUrl={reply.authorAvatar}
         badge={reply.authorBadge}
         canReply={canReply}
+        canDelete={reply.canDelete}
         content={reply.content}
         createdAtLabel={formatCommunityTime(reply.publishedAt, locale)}
         deleted={reply.authorIsDeleted}
@@ -638,8 +629,10 @@ const ThreadReplyRow = memo(function ThreadReplyRow({
           onPress: () => onLike(reply),
         }}
         onReply={() => onReply(reply)}
+        onDelete={() => onDelete(reply)}
         palette={palette}
         replyToName={replyToName}
+        userId={reply.authorIsDeleted ? 0 : reply.authorId}
         userName={reply.authorName}
         {...(isChild ? { variant: 'reply' as const } : {})}
       />
@@ -653,7 +646,7 @@ function toCommunityCommentPalette(
   return {
     accent: colors.accent,
     error: colors.error,
-    highlightBackground: colors.primaryContainer,
+    highlightColor: colors.accent,
     label: colors.label,
     onSurfaceVariant: colors.secondaryLabel,
     separator: colors.separator,
@@ -667,8 +660,6 @@ const useCommunityThreadStyles = createThemedStyles((colors) => ({
   authorCopy: { flex: 1 },
   authorName: { color: colors.label, fontSize: 14, fontWeight: '700' },
   authorRow: { alignItems: 'center', flexDirection: 'row', gap: 10 },
-  avatar: { overflow: 'hidden' },
-  avatarLabel: { fontSize: 13, fontWeight: '700' },
   childMoreButton: { alignSelf: 'flex-start', marginLeft: 6 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 14, paddingTop: 14 },
   content: { paddingBottom: 42, paddingHorizontal: 16 },

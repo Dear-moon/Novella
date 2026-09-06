@@ -41,6 +41,7 @@ export const CommentThreadItem = memo(function CommentThreadItem({
         onDelete={() => onDelete(item.id)}
         onReply={() => onReply({ parentId: item.id, userName: item.user.userName })}
         palette={palette}
+        userId={item.user.id}
         userName={item.user.userName}
       />
       {item.replies.length > 0 ? (
@@ -127,6 +128,20 @@ export function CommentThreadSkeleton({
   );
 }
 
+export function CommentThreadLoadingFooter({
+  loading,
+  palette,
+}: {
+  loading: boolean;
+  palette: CommentThreadPalette;
+}) {
+  return (
+    <View pointerEvents="none" style={styles.loadingFooter}>
+      {loading ? <CommentThreadSkeleton palette={palette} rows={1} /> : null}
+    </View>
+  );
+}
+
 const CommentReplyItem = memo(function CommentReplyItem({
   onDelete,
   onReply,
@@ -156,6 +171,7 @@ const CommentReplyItem = memo(function CommentReplyItem({
       })}
       palette={palette}
       replyToName={reply.replyToUser?.userName ?? null}
+      userId={reply.user.id}
       userName={reply.user.userName}
       variant="reply"
     />
@@ -164,6 +180,7 @@ const CommentReplyItem = memo(function CommentReplyItem({
 
 const styles = StyleSheet.create({
   commentBlock: { paddingBottom: 8 },
+  loadingFooter: { height: 96 },
   skeletonAction: { height: 11, marginTop: 4, width: '32%' },
   skeletonAvatar: { borderRadius: 20, height: 40, overflow: 'hidden', width: 40 },
   skeletonBody: { flex: 1, gap: 7, paddingTop: 3 },

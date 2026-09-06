@@ -16,6 +16,7 @@ import { useTranslation } from 'react-i18next';
 
 import { BookDetailThemeProvider } from '@/components/book-detail-theme-provider';
 import { ClientSessionFeedback } from '@/components/client-session-feedback';
+import { ClientRealtimeEvents } from '@/components/client-realtime-events';
 import { AppLocalizationProvider } from '@/localization/localization-provider';
 import { NativeAlertHost } from '@/components/native-alert-dialog';
 import { useAuthentication } from '@/hooks/use-authentication';
@@ -342,8 +343,9 @@ function RootLayoutContent() {
             <Stack.Screen name="reset-password/new-password" options={{ headerShown: !usesComposeBottomSheets, title: tAuth('navigation.recover') }} />
           </Stack.Protected>
         </Stack>
-        <ClientSessionFeedback sessionDecided={sessionDecided} />
-        <NativeAlertHost />
+       <ClientSessionFeedback sessionDecided={sessionDecided} />
+        <ClientRealtimeEvents />
+       <NativeAlertHost />
       </BookDetailThemeProvider>
         </ThemeProvider>
       </HeroUINativeProvider>

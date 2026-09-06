@@ -9,7 +9,8 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 
 import { showAlert } from '@/components/native-alert-dialog';
 import { useProfile } from '@/hooks/use-profile';
-import { points, profile } from '@/services/client';
+import { profile, shop } from '@/services/client';
+import { SIGN_MAKEUP_ITEM_KEY } from '@novella/client-core';
 import { useAppTheme } from '@/theme/app-theme';
 
 /** UTC day window in which a missed day may be made up (PointService.SignMakeupWindowDays). */
@@ -69,8 +70,8 @@ export function CheckInCalendarSheet() {
   const loadCalendar = useCallback(async () => {
     setLoading(true);
     try {
-      const calendar = await points.getSignInCalendar(year, month);
-      setSignedDays(new Set(calendar.days.map((day) => Number(day.signDate.slice(8, 10)))));
+      const calendar = await shop.loadSignInCalendar(year, month);
+      setSignedDays(new Set(calendar.days.map((day) => Number(day.date.slice(8, 10)))));
     } catch (error) {
       showAlert(t('profile.checkIn.loadFailedTitle'), error instanceof Error ? error.message : '');
     } finally {
@@ -80,7 +81,7 @@ export function CheckInCalendarSheet() {
 
   const loadMakeupCards = useCallback(async () => {
     try {
-      setMakeupCards(await points.getMakeupCardCount());
+      setMakeupCards((await shop.load()).ownedItems.find((item) => item.key === SIGN_MAKEUP_ITEM_KEY)?.quantity ?? 0);
     } catch {
       // A failed count leaves the make-up rows non-interactive; sign still works.
     }
@@ -124,12 +125,12 @@ export function CheckInCalendarSheet() {
     const date = new Date(dayUtc(day)).toISOString().slice(0, 10);
     setMadeUpDay(day);
     try {
-      const result = await points.useSignMakeupCard(date);
-      setMakeupCards(result.owned);
+      const result = await shop.useSignMakeupCard(date);
+      setMakeupCards(result.result.owned);
       await Promise.all([loadCalendar(), reloadProfile()]);
       showAlert(
         t('profile.checkIn.makeUpSuccessTitle'),
-        t('profile.checkIn.makeUpSuccessMessage', { streak: result.streak }),
+        t('profile.checkIn.makeUpSuccessMessage', { streak: result.result.streak }),
       );
     } catch (error) {
       showAlert(t('profile.checkIn.makeUpFailedTitle'), error instanceof Error ? error.message : '');

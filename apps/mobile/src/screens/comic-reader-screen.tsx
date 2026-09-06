@@ -14,7 +14,7 @@ import {
   type NativeSyntheticEvent,
   type ViewToken,
 } from 'react-native';
-import { ApiError, type ComicContent, type ComicInfo } from '@novella/api-client';
+import { ApiError, type BookDetail, type ComicContent } from '@novella/api-client';
 import { createComicPageSlots, mergeComicPageBatch, resolveReaderInitialIndex, resolveReaderRestorePosition, type ComicPageSlot, type ReaderMode, type ReaderOpenPosition } from '@novella/reader-engine';
 
 import { createComicBlurHashPlaceholder } from '@/services/blurhash';
@@ -39,7 +39,7 @@ import {
   resolveComicTapDirection,
   type ComicReadingDirection,
 } from '@/services/comic-reader-layout';
-import { reader } from '@/services/client';
+import { bookDetails, reader } from '@/services/client';
 import { ReaderChapterNavigation } from '@/components/reader-chapter-navigation';
 import { ReaderErrorState, ReaderPreparationState } from '@/components/reader-chrome';
 import { ReaderNavigation } from '@/components/reader-navigation';
@@ -144,7 +144,7 @@ function ComicReaderScreenContent({ bookId, sortNum, openPosition = 'saved' }: C
     chapterId: number;
     index: number;
   } | null>(null);
-  const [info, setInfo] = useState<ComicInfo | null>(null);
+  const [info, setInfo] = useState<BookDetail | null>(null);
   const [chapter, setChapter] = useState<ComicContent | null>(null);
   const [slots, setSlots] = useState<ComicPageSlot[]>([]);
   const [error, setError] = useState<ReaderUserMessage | null>(null);
@@ -184,7 +184,7 @@ function ComicReaderScreenContent({ bookId, sortNum, openPosition = 'saved' }: C
     setChapter(null);
     setSlots([]);
     try {
-      const loadedInfo = await reader.loadComicInfo(bookId);
+      const loadedInfo = await bookDetails.load(bookId);
       if (version !== requestVersion.current) return;
       const selected = loadedInfo.chapters.find((item) => item.sortNum === sortNum) ?? loadedInfo.chapters[sortNum - 1];
       if (!selected) throw new ComicReaderKnownError('errors.chapterUnavailable');

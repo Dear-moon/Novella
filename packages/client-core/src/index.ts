@@ -1,10 +1,9 @@
-import {
+﻿import {
   ApiClient,
   ApiError,
   type AnnouncementDetail,
   type AnnouncementPage,
   type AppNotificationPage,
-  type BuyShopItemResult,
   type CommunityFavoriteToggleResult,
   type CommunityFeedPayload,
   type CommunityHomePayload,
@@ -15,24 +14,24 @@ import {
   type CommunityReplyDeletionResult,
   type CommunityThreadDetail,
   type CommunityThreadEditInfo,
+  type CommunityThreadLockResult,
   type CommunityThreadMutationResult,
   type CommunityThreadReply,
   type CreateCommunityReplyRequest,
   type CreateCommunityThreadRequest,
   type GetCommunityReplyChildrenRequest,
-  type UpdateCommunityThreadRequest,
   type GetCommunityThreadRequest,
   type GetNotificationsRequest,
+  type UpdateCommunityThreadRequest,
   type BookDetail,
   type BookListItem,
   type BookListOrder,
   type BookListPage,
   type BookSearchRequest,
+  type BuyShopItemResult,
   type ComicContent,
   type ComicContentRequest,
-  type ComicInfo,
   type ComicOrder,
-  type ComicSeriesDetail,
   type ComicSeriesListPage,
   type ComicSeriesListItem,
   type CommentPage,
@@ -41,16 +40,19 @@ import {
   type NovelContent,
   type NovelContentRequest,
   type OnlineInfo,
+  type OwnedShopItem,
   type PointLogPage,
   type PostCommentRequest,
+  type PublicUserSummary,
   type ReadHistory,
+  type ResetInviteCodeResult,
+  type ShopItem,
+  type SignInCalendar,
+  type UseComicQuotaCardResult,
+  type UseSignMakeupCardResult,
   type SaveReadPositionRequest,
   type ShelfItem,
-  type ShopInfo,
-  type ShopMyItems,
-  type SignInCalendar,
-  type SignMakeupCardResult,
-  type UseComicQuotaCardResult,
+  type UserGrowth,
   type UserProfile,
 } from '@novella/api-client';
 import type {
@@ -108,6 +110,7 @@ export interface ClientSessionDependencies {
   lifecycle: AppLifecycle;
   signalR: SignalRTransport;
   backgroundDrainTimeoutMilliseconds?: number;
+  backgroundDisconnectDelayMilliseconds?: number;
   connectionTimeoutMilliseconds?: number;
   reconnectRetryDelaysMilliseconds?: readonly number[];
 }
@@ -172,10 +175,7 @@ export interface BookDetailUseCase {
   load(bookId: number): Promise<BookDetail>;
 }
 
-export interface ComicDetailUseCase {
-  load(bookId: number): Promise<BookDetail>;
-  resolveSeriesTitle(bookId: number): Promise<string>;
-}
+export interface ComicDetailUseCase extends BookDetailUseCase {}
 
 export interface BookSearchUseCase {
   searchNovels(request: BookSearchRequest, signal?: AbortSignal): Promise<BookListPage>;
@@ -192,8 +192,6 @@ export interface HistoryUseCase {
 export interface ReaderUseCase {
   loadChapter(request: NovelContentRequest): Promise<NovelContent>;
   preloadChapter(request: NovelContentRequest, signal?: AbortSignal): Promise<NovelContent>;
-  loadComicInfo(bookId: number): Promise<ComicInfo>;
-  loadComicSeriesInfo(seriesTitle: string): Promise<ComicSeriesDetail>;
   loadComicContent(request: ComicContentRequest): Promise<ComicContent>;
   savePosition(request: SaveReadPositionRequest): Promise<void>;
 }
@@ -216,6 +214,9 @@ export type UpdateCommunityThreadInput = UpdateCommunityThreadRequest & {
 export interface CommunityUseCase {
   createReply(request: CreateCommunityReplyRequest): Promise<CommunityThreadReply>;
   createThread(request: CreateCommunityThreadInput): Promise<CommunityThreadDetail>;
+  deleteReply(replyId: number): Promise<CommunityReplyDeletionResult>;
+  deleteThread(threadId: number): Promise<CommunityThreadMutationResult>;
+  setThreadLocked(threadId: number, locked: boolean): Promise<CommunityThreadLockResult>;
   loadFeed(query?: CommunityListQuery, signal?: AbortSignal): Promise<CommunityFeedPayload>;
   loadHome(query?: CommunityListQuery, signal?: AbortSignal): Promise<CommunityHomePayload>;
   loadMyOverview(signal?: AbortSignal): Promise<CommunityMyOverview>;
@@ -227,12 +228,7 @@ export interface CommunityUseCase {
     request: GetCommunityThreadRequest,
     signal?: AbortSignal,
   ): Promise<CommunityThreadDetail | null>;
-  deleteReply(replyId: number): Promise<CommunityReplyDeletionResult>;
-  deleteThread(threadId: number): Promise<CommunityThreadMutationResult>;
-  loadThreadEditInfo(
-    threadId: number,
-    format?: 'html' | 'markdown',
-  ): Promise<CommunityThreadEditInfo>;
+  loadThreadEditInfo(threadId: number, format?: 'html' | 'markdown'): Promise<CommunityThreadEditInfo>;
   toggleReplyLike(replyId: number): Promise<CommunityLikeToggleResult>;
   toggleThreadFavorite(threadId: number): Promise<CommunityFavoriteToggleResult>;
   toggleThreadLike(threadId: number): Promise<CommunityLikeToggleResult>;
@@ -288,25 +284,66 @@ export interface ProfileCheckInOutcome {
   profile: UserProfile;
 }
 
+export interface ProfileResetInviteCodeOutcome {
+  result: ResetInviteCodeResult;
+  profile: UserProfile;
+}
+
+export interface ProfileGrowthDelta {
+  experienceDelta: number;
+  coinDelta: number;
+}
+
 export interface ProfileUseCase {
+  applyGrowth(growth: UserGrowth): ProfileGrowthDelta | null;
   checkIn(): Promise<ProfileCheckInOutcome>;
   getSnapshot(): UserProfile | null;
   load(): Promise<UserProfile>;
+  resetInviteCode(): Promise<ProfileResetInviteCodeOutcome>;
   setAvatar(url: string): Promise<UserProfile>;
   subscribe(listener: (profile: UserProfile) => void): () => void;
 }
 
-export type PointLogKind = 'exp' | 'coin';
+export const PUBLIC_USER_SUMMARY_CACHE_MILLISECONDS = 5 * 60 * 1_000;
 
-export interface PointsUseCase {
-  getSignInCalendar(year: number, month: number): Promise<SignInCalendar>;
-  getMakeupCardCount(): Promise<number>;
-  useSignMakeupCard(date: string): Promise<SignMakeupCardResult>;
-  useComicQuotaCard(): Promise<UseComicQuotaCardResult>;
-  getPointLog(kind: PointLogKind, page: number, size: number): Promise<PointLogPage>;
-  getShop(): Promise<ShopInfo>;
-  getMyItems(): Promise<ShopMyItems>;
-  buyShopItem(key: string, quantity: number): Promise<BuyShopItemResult>;
+export interface PublicProfileUseCase {
+  load(userId: number): Promise<PublicUserSummary>;
+}
+
+export const COMIC_QUOTA_ITEM_KEY = 'comic_quota_50';
+export const SIGN_MAKEUP_ITEM_KEY = 'sign_makeup';
+
+export interface ShopSnapshot {
+  coin: number;
+  items: ShopItem[];
+  ownedItems: OwnedShopItem[];
+}
+
+export interface ShopMakeupOutcome {
+  result: UseSignMakeupCardResult;
+  snapshot: ShopSnapshot;
+}
+
+export interface ShopQuotaOutcome {
+  result: UseComicQuotaCardResult;
+  snapshot: ShopSnapshot;
+}
+
+export type PointLogKind = 'experience' | 'coin';
+
+export interface PointLogUseCase {
+  loadPage(kind: PointLogKind, page: number, size?: number): Promise<PointLogPage>;
+}
+
+export interface ShopUseCase {
+  buy(key: string, quantity?: number): Promise<ShopSnapshot>;
+  getSnapshot(): ShopSnapshot | null;
+  load(): Promise<ShopSnapshot>;
+  loadSignInCalendar(year: number, month: number): Promise<SignInCalendar>;
+  reset(): void;
+  subscribe(listener: (snapshot: ShopSnapshot | null) => void): () => void;
+  useComicQuotaCard(): Promise<ShopQuotaOutcome>;
+  useSignMakeupCard(date: string): Promise<ShopMakeupOutcome>;
 }
 
 export interface AuthenticationUseCase {
@@ -371,12 +408,19 @@ export function createClientSessionController(
   let recovery: { epoch: number; promise: Promise<void> } | null = null;
   let epoch = 0;
   let closed = false;
+  let backgroundStartedAt: number | null = null;
+  let backgroundConnectionClosed = false;
+  let backgroundDisconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let gate = createClosedInvocationGate();
   let sessionSnapshot: ClientSessionSnapshot = { status: 'idle', error: null };
   const sessionListeners = new Set<(snapshot: ClientSessionSnapshot) => void>();
   const backgroundTasks = new Set<() => void | Promise<void>>();
   const backgroundDrainTimeoutMilliseconds =
     dependencies.backgroundDrainTimeoutMilliseconds ?? 2_000;
+  const backgroundDisconnectDelayMilliseconds = Math.max(
+    0,
+    dependencies.backgroundDisconnectDelayMilliseconds ?? 30_000,
+  );
   const connectionTimeoutMilliseconds =
     dependencies.connectionTimeoutMilliseconds ?? 30_000;
   const reconnectRetryDelaysMilliseconds =
@@ -389,6 +433,12 @@ export function createClientSessionController(
 
   function closeGate(): void {
     if (gate.open) gate = createClosedInvocationGate();
+  }
+
+  function cancelBackgroundDisconnect(): void {
+    if (backgroundDisconnectTimer === null) return;
+    clearTimeout(backgroundDisconnectTimer);
+    backgroundDisconnectTimer = null;
   }
 
   function openGate(): void {
@@ -442,12 +492,26 @@ export function createClientSessionController(
     }
   }
 
-  function startRecovery(recoveryEpoch: number, refreshAuthentication: boolean): Promise<void> {
+  function startRecovery(
+    recoveryEpoch: number,
+    refreshAuthentication: boolean,
+    forceReconnect = false,
+    silent = false,
+  ): Promise<void> {
     if (recovery?.epoch === recoveryEpoch) return recovery.promise;
 
     const promise = (async () => {
-      publish({ status: 'reconnecting', error: null });
+      if (!silent) publish({ status: 'reconnecting', error: null });
       let lastError: unknown | null = null;
+
+      if (forceReconnect) {
+        try {
+          await enqueueTransition(() => dependencies.signalR.close());
+        } catch (error) {
+          lastError = error;
+        }
+        if (!isCurrent(recoveryEpoch)) return;
+      }
 
       if (refreshAuthentication) {
         try {
@@ -514,6 +578,28 @@ export function createClientSessionController(
     }
   }
 
+  function scheduleBackgroundDisconnect(
+    transitionEpoch: number,
+    startedAt: number,
+    drain: Promise<void>,
+  ): void {
+    void drain.then(() => {
+      if (closed || foreground || transitionEpoch !== epoch) return;
+      const elapsed = Date.now() - startedAt;
+      const delay = Math.max(0, backgroundDisconnectDelayMilliseconds - elapsed);
+      backgroundDisconnectTimer = setTimeout(() => {
+        backgroundDisconnectTimer = null;
+        if (closed || foreground || transitionEpoch !== epoch) return;
+        void enqueueTransition(async () => {
+          if (closed || foreground || transitionEpoch !== epoch) return;
+          closeGate();
+          await dependencies.signalR.close();
+          backgroundConnectionClosed = true;
+        }).catch(() => undefined);
+      }, delay);
+    }).catch(() => undefined);
+  }
+
   function handleLifecycleState(state: 'foreground' | 'background'): void {
     if (closed) return;
     const nextForeground = state === 'foreground';
@@ -523,19 +609,36 @@ export function createClientSessionController(
     const transitionEpoch = ++epoch;
 
     if (!nextForeground) {
+      backgroundStartedAt = Date.now();
+      backgroundConnectionClosed = false;
       publish({ status: 'background', error: null });
-      const drain = drainBackgroundTasks();
-      void enqueueTransition(async () => {
-        await drain;
-        if (closed || foreground || transitionEpoch !== epoch) return;
-        closeGate();
-        await dependencies.signalR.close();
-      }).catch(() => undefined);
+      scheduleBackgroundDisconnect(
+        transitionEpoch,
+        backgroundStartedAt,
+        drainBackgroundTasks(),
+      );
       return;
     }
 
+    const backgroundDuration = backgroundStartedAt === null
+      ? null
+      : Math.max(0, Date.now() - backgroundStartedAt);
+    const forceReconnect =
+      !backgroundConnectionClosed &&
+      backgroundDuration !== null &&
+      backgroundDuration >= backgroundDisconnectDelayMilliseconds;
+    backgroundStartedAt = null;
+    backgroundConnectionClosed = false;
+    cancelBackgroundDisconnect();
     closeGate();
-    void startRecovery(transitionEpoch, true).catch(() => undefined);
+    void startRecovery(
+      transitionEpoch,
+      backgroundDuration === null ||
+        backgroundDuration >= backgroundDisconnectDelayMilliseconds,
+      forceReconnect,
+      backgroundDuration !== null &&
+        backgroundDuration < backgroundDisconnectDelayMilliseconds,
+    ).catch(() => undefined);
   }
 
   const transport: SignalRTransport = Object.freeze({
@@ -546,6 +649,9 @@ export function createClientSessionController(
     async invoke<T>(methodName: string, args: readonly unknown[]): Promise<T> {
       await gate.promise;
       return dependencies.signalR.invoke<T>(methodName, args);
+    },
+    subscribe(methodName: string, listener: (payload: unknown) => void) {
+      return dependencies.signalR.subscribe(methodName, listener);
     },
     close() {
       return dependencies.signalR.close();
@@ -624,6 +730,9 @@ export function createClientSessionController(
       if (closed) return;
       closed = true;
       foreground = false;
+      backgroundStartedAt = null;
+      backgroundConnectionClosed = false;
+      cancelBackgroundDisconnect();
       epoch += 1;
       closeGate();
       lifecycleUnsubscribe?.();
@@ -737,43 +846,9 @@ export function createComicDetailUseCase(api: ApiClient): ComicDetailUseCase {
   return Object.freeze({
     load(bookId: number) {
       assertValidBookId(bookId);
-      return api.getComicInfo(bookId).then(toBookDetail);
-    },
-    async resolveSeriesTitle(bookId: number) {
-      assertValidBookId(bookId);
-      const page = await api.getComicSeriesByIds([bookId]);
-      const seriesTitle = page.items[0]?.title.trim();
-      if (!seriesTitle) throw new Error('The comic series title is unavailable.');
-      return seriesTitle;
+      return api.getBookInfo(bookId);
     },
   });
-}
-
-/** Normalize the comic detail payload into the shared `BookDetail` shape so
- * the detail page renders one UI for novels and comics alike. Comic chapters
- * carry their own `sortNum`, but the detail page derives the sort number from
- * the chapter order (contiguous 1..N), which the reader resolves the same way. */
-export function toBookDetail(info: ComicInfo): BookDetail {
-  return {
-    id: info.id,
-    type: 'Comic',
-    coverUrl: info.coverUrl,
-    coverPlaceholder: info.coverPlaceholder,
-    title: info.title,
-    authorName: info.authorName,
-    category: null,
-    introduction: info.introduction,
-    lastUpdatedChapter: info.lastUpdatedChapter,
-    lastUpdatedAt: info.lastUpdatedAt,
-    createdAt: info.createdAt,
-    favoriteCount: info.favoriteCount,
-    viewCount: info.views,
-    canEdit: false,
-    chapters: info.chapters.map((chapter) => ({ id: chapter.id, title: chapter.title })),
-    user: info.user,
-    classification: info.classification,
-    readPosition: info.readPosition,
-  };
 }
 
 export function createBookSearchUseCase(api: ApiClient): BookSearchUseCase {
@@ -862,16 +937,6 @@ export function createReaderUseCase(api: ApiClient): ReaderUseCase {
     preloadChapter(request: NovelContentRequest, signal?: AbortSignal) {
       return loadChapter(request, 'preload', signal);
     },
-    loadComicInfo(bookId: number) {
-      assertValidBookId(bookId);
-      return api.getComicInfo(bookId);
-    },
-    loadComicSeriesInfo(seriesTitle: string) {
-      if (!seriesTitle.trim()) {
-        return Promise.reject(new Error('A comic series title is required.'));
-      }
-      return api.getComicSeriesInfo(seriesTitle);
-    },
     loadComicContent(request: ComicContentRequest) {
       assertPositiveInteger(request.chapterId, 'A valid comic chapter id is required.');
       if (request.skip !== undefined) assertNonNegativeInteger(request.skip, 'A valid image offset is required.');
@@ -946,6 +1011,19 @@ export function createCommunityUseCase(api: ApiClient): CommunityUseCase {
         contentHtml,
       });
     },
+    deleteReply(replyId: number) {
+      assertPositiveInteger(replyId, 'A valid Community reply id is required.');
+      return api.deleteCommunityReply(replyId);
+    },
+    deleteThread(threadId: number) {
+      assertPositiveInteger(threadId, 'A valid Community thread id is required.');
+      return api.deleteCommunityThread(threadId);
+    },
+    setThreadLocked(threadId: number, locked: boolean) {
+      assertPositiveInteger(threadId, 'A valid Community thread id is required.');
+      if (typeof locked !== 'boolean') throw new Error('A valid thread lock state is required.');
+      return api.setCommunityThreadLocked(threadId, locked);
+    },
     loadFeed(query: CommunityListQuery = {}, signal?: AbortSignal) {
       assertCommunityListQuery(query);
       return api.getCommunityFeed(query, signal ? { signal } : {});
@@ -967,6 +1045,9 @@ export function createCommunityUseCase(api: ApiClient): CommunityUseCase {
         assertPositiveInteger(request.page, 'A valid reply page is required.');
       }
       if (request.size !== undefined) assertPageSize(request.size);
+      if (request.afterReplyId !== undefined) {
+        assertNonNegativeInteger(request.afterReplyId, 'A valid reply cursor is required.');
+      }
       return api.getCommunityReplyChildren(request, signal ? { signal } : {});
     },
     loadThread(request: GetCommunityThreadRequest, signal?: AbortSignal) {
@@ -975,15 +1056,10 @@ export function createCommunityUseCase(api: ApiClient): CommunityUseCase {
         assertPositiveInteger(request.replyPage, 'A valid reply page is required.');
       }
       if (request.replySize !== undefined) assertPageSize(request.replySize);
+      if (request.focusReplyId !== undefined) {
+        assertNonNegativeInteger(request.focusReplyId, 'A valid focus reply id is required.');
+      }
       return api.getCommunityThread(request, signal ? { signal } : {});
-    },
-    deleteReply(replyId: number) {
-      assertPositiveInteger(replyId, 'A valid Community reply id is required.');
-      return api.deleteCommunityReply(replyId);
-    },
-    deleteThread(threadId: number) {
-      assertPositiveInteger(threadId, 'A valid Community thread id is required.');
-      return api.deleteCommunityThread(threadId);
     },
     loadThreadEditInfo(threadId: number, format: 'html' | 'markdown' = 'html') {
       assertPositiveInteger(threadId, 'A valid Community thread id is required.');
@@ -1087,6 +1163,7 @@ export function createProfileUseCase(api: ApiClient): ProfileUseCase {
   let latest: UserProfile | null = null;
   let generation = 0;
   let mutationQueue = Promise.resolve();
+  let loadPromise: Promise<UserProfile> | null = null;
   const listeners = new Set<(profile: UserProfile) => void>();
 
   function publish(profile: UserProfile): UserProfile {
@@ -1097,11 +1174,12 @@ export function createProfileUseCase(api: ApiClient): ProfileUseCase {
 
   function enqueueMutation<T>(
     mutate: () => Promise<T>,
+    resolveProfile: (result: T) => Promise<UserProfile> = () => api.getMyProfile(),
   ): Promise<{ result: T; profile: UserProfile }> {
     const mutationGeneration = ++generation;
     const operation = mutationQueue.then(async () => {
       const result = await mutate();
-      const profile = await api.getMyProfile();
+      const profile = await resolveProfile(result);
       if (mutationGeneration === generation) publish(profile);
       return { profile, result };
     });
@@ -1110,18 +1188,42 @@ export function createProfileUseCase(api: ApiClient): ProfileUseCase {
   }
 
   return Object.freeze({
+    applyGrowth(growth: UserGrowth) {
+      if (!latest) return null;
+      generation += 1;
+      const experienceDelta = growth.experience - latest.growth.experience;
+      const coinDelta = growth.coin - latest.growth.coin;
+      publish({ ...latest, growth });
+      return { coinDelta, experienceDelta };
+    },
     checkIn() {
       return enqueueMutation(() => api.checkIn());
     },
     getSnapshot() {
       return latest;
     },
-    async load() {
-      await mutationQueue;
-      const requestGeneration = ++generation;
-      const profile = await api.getMyProfile();
-      if (requestGeneration !== generation) return latest ?? profile;
-      return publish(profile);
+    load() {
+      if (loadPromise) return loadPromise;
+      const request = (async () => {
+        await mutationQueue;
+        const requestGeneration = ++generation;
+        const profile = await api.getMyProfile();
+        if (requestGeneration !== generation) return latest ?? profile;
+        return publish(profile);
+      })().finally(() => {
+        if (loadPromise === request) loadPromise = null;
+      });
+      loadPromise = request;
+      return request;
+    },
+    resetInviteCode() {
+      return enqueueMutation(
+        () => api.resetInviteCode(),
+        async (result) => ({
+          ...(latest ?? await api.getMyProfile()),
+          inviteCode: result.inviteCode,
+        }),
+      );
     },
     async setAvatar(url: string) {
       const normalized = url.trim();
@@ -1138,34 +1240,239 @@ export function createProfileUseCase(api: ApiClient): ProfileUseCase {
   });
 }
 
-const SIGN_MAKEUP_ITEM_KEY = 'sign_makeup';
+export function createPublicProfileUseCase(
+  api: ApiClient,
+  now: () => number = Date.now,
+): PublicProfileUseCase {
+  const cache = new Map<number, { expiresAt: number; value: PublicUserSummary }>();
+  const requests = new Map<number, Promise<PublicUserSummary>>();
 
-export function createPointsUseCase(api: ApiClient): PointsUseCase {
   return Object.freeze({
-    getSignInCalendar(year: number, month: number) {
+    load(userId: number) {
+      assertPositiveInteger(userId, 'A valid user id is required.');
+      const cached = cache.get(userId);
+      if (cached && cached.expiresAt > now()) return Promise.resolve(cached.value);
+
+      const pending = requests.get(userId);
+      if (pending) return pending;
+
+      const request = api.getPublicUserSummary(userId)
+        .then((value) => {
+          cache.set(userId, {
+            expiresAt: now() + PUBLIC_USER_SUMMARY_CACHE_MILLISECONDS,
+            value,
+          });
+          return value;
+        })
+        .finally(() => requests.delete(userId));
+      requests.set(userId, request);
+      return request;
+    },
+  });
+}
+
+export function createPointLogUseCase(api: ApiClient): PointLogUseCase {
+  return Object.freeze({
+    loadPage(kind: PointLogKind, page: number, size = 20) {
+      if (kind !== 'experience' && kind !== 'coin') {
+        throw new Error('A valid point log kind is required.');
+      }
+      assertPositiveInteger(page, 'A valid point log page is required.');
+      assertPageSize(size);
+      return kind === 'coin'
+        ? api.getCoinLog(page, size)
+        : api.getPointLog(page, size);
+    },
+  });
+}
+
+export function createShopUseCase(api: ApiClient): ShopUseCase {
+  let latest: ShopSnapshot | null = null;
+  let generation = 0;
+  let mutationQueue = Promise.resolve();
+  const listeners = new Set<(snapshot: ShopSnapshot | null) => void>();
+
+  function publish(snapshot: ShopSnapshot): ShopSnapshot {
+    latest = snapshot;
+    for (const listener of listeners) listener(snapshot);
+    return snapshot;
+  }
+
+  async function fetchSnapshot(): Promise<ShopSnapshot> {
+    const [shop, owned] = await Promise.all([
+      api.getShop(),
+      api.getMyShopItems(),
+    ]);
+    return {
+      coin: shop.coin,
+      items: shop.items,
+      ownedItems: owned.items,
+    };
+  }
+
+  function projectPurchase(result: BuyShopItemResult): ShopSnapshot | null {
+    if (!latest) return null;
+    const purchasedItem = latest.items.find((item) => item.key === result.key);
+    const items = latest.items.map((item) => item.key === result.key
+      ? {
+          ...item,
+          monthlyPurchased: result.monthlyPurchased,
+          owned: result.owned,
+        }
+      : item);
+    const existingOwned = latest.ownedItems.some((item) => item.key === result.key);
+    const ownedItems = existingOwned
+      ? latest.ownedItems.map((item) => item.key === result.key
+          ? { ...item, quantity: result.owned }
+          : item)
+      : purchasedItem
+        ? [...latest.ownedItems, {
+            key: purchasedItem.key,
+            name: purchasedItem.name,
+            description: purchasedItem.description,
+            image: purchasedItem.image,
+            quantity: result.owned,
+          }]
+        : latest.ownedItems;
+    return { coin: result.coin, items, ownedItems };
+  }
+
+  function projectOwnedItemUse(itemKey: string, owned: number): ShopSnapshot | null {
+    if (!latest) return null;
+    const shopItem = latest.items.find((item) => item.key === itemKey);
+    const items = latest.items.map((item) => item.key === itemKey
+      ? { ...item, owned }
+      : item);
+    const hasOwnedItem = latest.ownedItems.some((item) => item.key === itemKey);
+    const ownedItems = owned <= 0
+      ? latest.ownedItems.filter((item) => item.key !== itemKey)
+      : hasOwnedItem
+        ? latest.ownedItems.map((item) => item.key === itemKey
+            ? { ...item, quantity: owned }
+            : item)
+        : shopItem
+          ? [...latest.ownedItems, {
+              key: shopItem.key,
+              name: shopItem.name,
+              description: shopItem.description,
+              image: shopItem.image,
+              quantity: owned,
+            }]
+          : latest.ownedItems;
+    return { ...latest, items, ownedItems };
+  }
+
+  function projectMakeupUse(result: UseSignMakeupCardResult): ShopSnapshot | null {
+    return projectOwnedItemUse(SIGN_MAKEUP_ITEM_KEY, result.owned);
+  }
+
+  function projectQuotaUse(result: UseComicQuotaCardResult): ShopSnapshot | null {
+    return projectOwnedItemUse(result.key, result.owned);
+  }
+
+  return Object.freeze({
+    buy(key: string, quantity = 1) {
+      const normalizedKey = key.trim();
+      if (!normalizedKey) throw new Error('A shop item key is required.');
+      if (!Number.isInteger(quantity) || quantity <= 0) {
+        throw new Error('A positive shop item quantity is required.');
+      }
+
+      const mutationGeneration = ++generation;
+      const operation = mutationQueue.then(async () => {
+        const result = await api.buyShopItem({ key: normalizedKey, quantity });
+        const confirmed = projectPurchase(result);
+        let snapshot: ShopSnapshot;
+        try {
+          snapshot = await fetchSnapshot();
+        } catch (error) {
+          if (!confirmed) throw error;
+          snapshot = confirmed;
+        }
+        return mutationGeneration === generation ? publish(snapshot) : snapshot;
+      });
+      mutationQueue = operation.then(() => undefined, () => undefined);
+      return operation;
+    },
+    getSnapshot() {
+      return latest;
+    },
+    async load() {
+      await mutationQueue;
+      const requestGeneration = ++generation;
+      const snapshot = await fetchSnapshot();
+      if (requestGeneration !== generation) return latest ?? snapshot;
+      return publish(snapshot);
+    },
+    loadSignInCalendar(year: number, month: number) {
+      if (!Number.isInteger(year) || year < 1) {
+        return Promise.reject(new Error('A valid calendar year is required.'));
+      }
+      if (!Number.isInteger(month) || month < 1 || month > 12) {
+        return Promise.reject(new Error('A valid calendar month is required.'));
+      }
       return api.getSignInCalendar(year, month);
     },
-    async getMakeupCardCount() {
-      const items = await api.getMyItems();
-      return items.items.find((item) => item.key === SIGN_MAKEUP_ITEM_KEY)?.quantity ?? 0;
+    reset() {
+      generation += 1;
+      latest = null;
+      for (const listener of listeners) listener(null);
     },
-    useSignMakeupCard(date: string) {
-      return api.useSignMakeupCard(date);
+    subscribe(listener: (snapshot: ShopSnapshot | null) => void) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
     },
     useComicQuotaCard() {
-      return api.useComicQuotaCard();
+      if (!latest) {
+        return Promise.reject(new Error('The shop must be loaded before using an item.'));
+      }
+
+      const mutationGeneration = ++generation;
+      const operation = mutationQueue.then(async () => {
+        const result = await api.useComicQuotaCard();
+        const confirmed = projectQuotaUse(result);
+        let snapshot: ShopSnapshot;
+        try {
+          snapshot = await fetchSnapshot();
+        } catch (error) {
+          if (!confirmed) throw error;
+          snapshot = confirmed;
+        }
+        return {
+          result,
+          snapshot: mutationGeneration === generation ? publish(snapshot) : snapshot,
+        };
+      });
+      mutationQueue = operation.then(() => undefined, () => undefined);
+      return operation;
     },
-    getPointLog(kind: PointLogKind, page: number, size: number) {
-      return kind === 'coin' ? api.getCoinLog(page, size) : api.getPointLog(page, size);
-    },
-    getShop() {
-      return api.getShop();
-    },
-    getMyItems() {
-      return api.getMyItems();
-    },
-    buyShopItem(key: string, quantity: number) {
-      return api.buyShopItem(key, quantity);
+    useSignMakeupCard(date: string) {
+      const normalizedDate = date.trim();
+      if (!isValidUtcDate(normalizedDate)) {
+        return Promise.reject(new Error('A UTC date in yyyy-MM-dd format is required.'));
+      }
+      if (!latest) {
+        return Promise.reject(new Error('The shop must be loaded before using an item.'));
+      }
+
+      const mutationGeneration = ++generation;
+      const operation = mutationQueue.then(async () => {
+        const result = await api.useSignMakeupCard({ date: normalizedDate });
+        const confirmed = projectMakeupUse(result);
+        let snapshot: ShopSnapshot;
+        try {
+          snapshot = await fetchSnapshot();
+        } catch (error) {
+          if (!confirmed) throw error;
+          snapshot = confirmed;
+        }
+        return {
+          result,
+          snapshot: mutationGeneration === generation ? publish(snapshot) : snapshot,
+        };
+      });
+      mutationQueue = operation.then(() => undefined, () => undefined);
+      return operation;
     },
   });
 }
@@ -1554,6 +1861,13 @@ function assertNonNegativeInteger(value: number, message: string): void {
   if (!Number.isInteger(value) || value < 0) throw new Error(message);
 }
 
+function isValidUtcDate(value: string): boolean {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match || Number(match[1]) < 1) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
 function assertPageSize(value: number): void {
   if (!Number.isInteger(value) || value < 1 || value > 24) {
     throw new Error('Page size must be between 1 and 24.');
@@ -1561,17 +1875,8 @@ function assertPageSize(value: number): void {
 }
 
 function assertCommentTarget(
-  request: Pick<GetCommentsRequest, 'id' | 'seriesTitle' | 'type'>,
+  request: Pick<GetCommentsRequest, 'id' | 'type'>,
 ): void {
-  if (request.type === 'Series') {
-    if (request.id !== 0) {
-      throw new Error('A series comment target id must be zero.');
-    }
-    if (!request.seriesTitle?.trim()) {
-      throw new Error('A series title is required for series comments.');
-    }
-    return;
-  }
   assertPositiveInteger(request.id, 'A valid comment target id is required.');
 }
 
@@ -1663,7 +1968,7 @@ export function createAuthenticationUseCase(
       if (!persisted) return false;
       revision += 1;
       publish({ status: 'authenticated', error: null });
-      await signalR.close();
+      await signalR.close().catch(() => undefined);
       return true;
     } catch (error) {
       if (expectedRevision !== revision) return false;
@@ -1731,7 +2036,7 @@ export function createAuthenticationUseCase(
         throw new Error('Sign in was cancelled.');
       }
       publish({ status: 'authenticated', error: null });
-      await signalR.close();
+      await signalR.close().catch(() => undefined);
     } catch (error) {
       if (expectedRevision === revision) {
         publish({
@@ -1768,7 +2073,7 @@ export function createAuthenticationUseCase(
         throw new Error('Registration was cancelled.');
       }
       publish({ status: 'authenticated', error: null });
-      await signalR.close();
+      await signalR.close().catch(() => undefined);
     } catch (error) {
       if (expectedRevision === revision) {
         publish({

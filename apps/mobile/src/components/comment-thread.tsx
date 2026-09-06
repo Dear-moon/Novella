@@ -4,12 +4,12 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { ColorValue } from 'react-native';
 
-import { CommentAvatar } from '@/components/comment-avatar';
+import { PublicUserAvatar } from '@/components/public-user-avatar';
 
 export interface CommentThreadPalette {
   accent: ColorValue;
   error: ColorValue;
-  highlightBackground: ColorValue;
+  highlightColor: ColorValue;
   label: ColorValue;
   onSurfaceVariant: ColorValue;
   separator: ColorValue;
@@ -40,6 +40,7 @@ export interface CommentThreadRowProps {
   palette: CommentThreadPalette;
   replyToName?: string | null;
   userName: string;
+  userId?: number;
   variant?: 'comment' | 'reply';
 }
 
@@ -66,6 +67,7 @@ export function CommentThreadRow({
   palette,
   replyToName,
   userName,
+  userId,
   variant = 'comment',
 }: CommentThreadRowProps) {
   const { t } = useTranslation('community');
@@ -77,12 +79,15 @@ export function CommentThreadRow({
       <View
         style={[
           styles.replyRow,
-          highlighted && [
-            styles.highlightedRow,
-            { backgroundColor: palette.highlightBackground },
-          ],
+          highlighted && styles.highlightedRow,
         ]}
       >
+        {highlighted ? (
+          <View
+            pointerEvents="none"
+            style={[styles.highlightOverlay, { backgroundColor: palette.highlightColor }]}
+          />
+        ) : null}
         {highlighted ? (
           <View
             pointerEvents="none"
@@ -91,11 +96,12 @@ export function CommentThreadRow({
         ) : null}
 
         <View style={styles.replyIdentity}>
-          <CommentAvatar
+          <PublicUserAvatar
             avatarUrl={avatarUrl}
-            backgroundColor={palette.surfaceContainerHighest}
-            color={palette.label}
+            fallbackBackground={palette.surfaceContainerHighest}
+            fallbackColor={palette.label}
             size={24}
+            userId={deleted ? 0 : (userId ?? 0)}
             userName={displayName}
           />
           <Text style={[styles.replyIdentityText, { color: palette.label }]}>
@@ -109,7 +115,6 @@ export function CommentThreadRow({
           {badge ? <CommentBadge label={badge} palette={palette} /> : null}
         </View>
         <Text
-          android_hyphenationFrequency="none"
           selectable
           style={[styles.commentText, { color: palette.label }]}
           textBreakStrategy="simple"
@@ -136,12 +141,15 @@ export function CommentThreadRow({
       style={[
         styles.commentRow,
         { paddingHorizontal: horizontalInset },
-        highlighted && [
-          styles.highlightedRow,
-          { backgroundColor: palette.highlightBackground },
-        ],
+        highlighted && styles.highlightedRow,
       ]}
     >
+      {highlighted ? (
+        <View
+          pointerEvents="none"
+          style={[styles.highlightOverlay, { backgroundColor: palette.highlightColor }]}
+        />
+      ) : null}
       {highlighted ? (
         <View
           pointerEvents="none"
@@ -149,11 +157,12 @@ export function CommentThreadRow({
         />
       ) : null}
 
-      <CommentAvatar
+      <PublicUserAvatar
         avatarUrl={avatarUrl}
-        backgroundColor={palette.surfaceContainerHighest}
-        color={palette.label}
+        fallbackBackground={palette.surfaceContainerHighest}
+        fallbackColor={palette.label}
         size={40}
+        userId={deleted ? 0 : (userId ?? 0)}
         userName={displayName}
       />
       <View style={styles.commentBody}>
@@ -167,7 +176,6 @@ export function CommentThreadRow({
           </Text>
         ) : null}
         <Text
-          android_hyphenationFrequency="none"
           selectable
           style={[styles.commentText, { color: palette.label }]}
           textBreakStrategy="simple"
@@ -329,11 +337,21 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.42 },
   commentText: { fontSize: 14, lineHeight: 19 },
   highlightBar: {
-    bottom: 0,
-    left: 0,
+    bottom: 2,
+    borderRadius: 999,
+    left: -8,
     position: 'absolute',
-    top: 0,
+    top: 2,
     width: 3,
+  },
+  highlightOverlay: {
+    borderRadius: 14,
+    bottom: -4,
+    left: -8,
+    opacity: 0.1,
+    position: 'absolute',
+    right: 0,
+    top: -4,
   },
   highlightedRow: { position: 'relative' },
   identityRow: { alignItems: 'center', flexDirection: 'row', flexWrap: 'wrap', gap: 7 },

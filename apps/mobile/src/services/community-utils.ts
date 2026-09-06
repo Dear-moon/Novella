@@ -1,5 +1,5 @@
 import type {
-  AppNotificationItem,
+  AppNotificationAction,
   CommunityThreadReply,
 } from '@novella/api-client';
 
@@ -100,14 +100,40 @@ export function findCommunityReply(
   return null;
 }
 
-export function notificationTargetParams(notification: AppNotificationItem): {
-  id: number;
-  parentReplyId: number | null;
-  replyId: number | null;
-} {
-  return {
-    id: notification.extra.objectId || notification.objectId,
-    parentReplyId: notification.extra.parentReplyId,
-    replyId: notification.extra.replyId,
-  };
+export type NotificationActionTarget =
+  | { kind: 'book'; bookId: number }
+  | { kind: 'announcement'; announcementId: number }
+  | { kind: 'communityThread'; threadId: number; replyId: number | null };
+
+export function resolveNotificationAction(
+  action: AppNotificationAction | null,
+): NotificationActionTarget | null {
+  if (action === null) return null;
+  switch (action.type) {
+    case 'open_book': {
+      const bookId = positiveInteger(action.data.book_id);
+      return bookId === null ? null : { kind: 'book', bookId };
+    }
+    case 'open_announcement': {
+      const announcementId = positiveInteger(action.data.announcement_id);
+      return announcementId === null ? null : { announcementId, kind: 'announcement' };
+    }
+    case 'open_community_thread': {
+      const threadId = positiveInteger(action.data.thread_id);
+      if (threadId === null) return null;
+      return {
+        kind: 'communityThread',
+        replyId: positiveInteger(action.data.reply_id),
+        threadId,
+      };
+    }
+    default:
+      return null;
+  }
+}
+
+function positiveInteger(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+    ? value
+    : null;
 }

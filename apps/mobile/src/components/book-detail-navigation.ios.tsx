@@ -59,11 +59,9 @@ export function BookDetailNavigation({
             onPress={() =>
               router.push({
                 pathname: '/book/[id]/comments',
-                params: toBookCommentRouteParams({
-                  bookId: book.id,
-                  bookType: book.type,
-                  ...(seriesTitle === undefined ? {} : { seriesTitle }),
-                }),
+               params: toBookCommentRouteParams({
+                 bookId: book.id,
+               }),
               })
             }
           />

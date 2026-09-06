@@ -10,8 +10,21 @@ import {
   decodeBookDetail,
   decodeComicContent,
   decodeComicInfo,
+  decodeComicSeriesDetail,
+  decodeCommentPage,
   decodeCommunityHome,
   decodeCommunityThread,
+  decodeCommunityThreadLockResult,
+  decodeBuyShopItemResult,
+  decodeOwnedShopItemsData,
+  decodePointLogPage,
+  decodePublicUserSummary,
+  decodeResetInviteCodeResult,
+  decodeShopData,
+  decodeSignInCalendar,
+  decodeUseComicQuotaCardResult,
+  decodeUseSignMakeupCardResult,
+  decodeUserGrowth,
   decodeUserProfile,
   decodeUserShelf,
   extractBlurHashPlaceholder,
@@ -35,7 +48,15 @@ test('decodes book details whose optional Web-Master text fields are empty', () 
       Favorite: 0,
       Views: 0,
       CanEdit: false,
-      Chapter: [{ Id: 100, Title: 'Chapter 1' }],
+      Chapters: [{
+        Id: 100,
+        SortNum: 3,
+        Title: 'Chapter 1',
+        CreatedAt: '2026-01-01T00:00:00.000Z',
+        UpdatedAt: null,
+        PageCount: 12,
+        DownloadCost: 0,
+      }],
       User: { Id: 4, UserName: 'uploader', Avatar: '' },
       Extra: {
         classification: {
@@ -54,6 +75,40 @@ test('decodes book details whose optional Web-Master text fields are empty', () 
   assert.equal(detail.lastUpdatedChapter, null);
   assert.equal(detail.classification.seriesName, null);
   assert.equal(detail.classification.seriesNameCn, null);
+  assert.equal(detail.chapters[0].sortNum, 3);
+  assert.equal(detail.chapters[0].pageCount, 12);
+});
+
+test('strictly decodes the Web-Master public user summary', () => {
+  const payload = {
+    Id: 42,
+    UserName: 'reader',
+    Avatar: 'https://cdn.example/avatar.png',
+    Role: 'Member',
+    Level: 7,
+    RegisterAt: '2026-01-02T00:00:00.000Z',
+    BookCount: 3,
+    CommunityThreadCount: 4,
+    CommunityReplyCount: 5,
+    CommentCount: 6,
+  };
+
+  assert.deepEqual(decodePublicUserSummary(payload), {
+    id: 42,
+    userName: 'reader',
+    avatarUrl: 'https://cdn.example/avatar.png',
+    role: 'Member',
+    level: 7,
+    registeredAt: '2026-01-02T00:00:00.000Z',
+    bookCount: 3,
+    communityThreadCount: 4,
+    communityReplyCount: 5,
+    commentCount: 6,
+  });
+  assert.throws(() => decodePublicUserSummary({ ...payload, Id: 0 }), /invalid identifier/);
+  assert.throws(() => decodePublicUserSummary({ ...payload, RegisterAt: 'not-a-date' }), /invalid date/);
+  assert.throws(() => decodePublicUserSummary({ ...payload, CommentCount: undefined }), /invalid number/);
+  assert.throws(() => decodePublicUserSummary({ ...payload, BookCount: -1 }), /invalid count/);
 });
 
 test('decodes the Web-Master profile and growth summary', () => {
@@ -70,6 +125,8 @@ test('decodes the Web-Master profile and growth summary', () => {
     Growth: {
       Exp: 180,
       Coin: 96,
+      ComicQuota: 75,
+      ComicQuotaToday: 12,
       Level: 4,
       GrowthLevel: 3,
       CurrentLevelExp: 150,
@@ -91,6 +148,8 @@ test('decodes the Web-Master profile and growth summary', () => {
     growth: {
       experience: 180,
       coin: 96,
+      comicQuota: 75,
+      comicQuotaToday: 12,
       level: 4,
       growthLevel: 3,
       currentLevelExperience: 150,
@@ -100,10 +159,301 @@ test('decodes the Web-Master profile and growth summary', () => {
     },
   });
 
-  const legacyProfile = decodeUserProfile({ Id: 43, RegisterAt: '' });
-  assert.equal(legacyProfile.registeredAt, null);
-  assert.equal(legacyProfile.growth.experience, 0);
-  assert.equal(legacyProfile.growth.signedToday, false);
+  assert.deepEqual(decodeUserGrowth({
+    Exp: 180,
+    Coin: 96,
+    ComicQuota: 75,
+    ComicQuotaToday: 12,
+    Level: 4,
+    GrowthLevel: 3,
+    CurrentLevelExp: 150,
+    NextLevelExp: 240,
+    SignStreak: 7,
+    TodaySigned: true,
+  }), profile.growth);
+
+  assert.equal(decodeUserGrowth({
+    Exp: 180,
+    Coin: 96,
+    ComicQuota: 75,
+    ComicQuotaToday: 12,
+    Level: 4,
+    GrowthLevel: 3,
+    CurrentLevelExp: 150,
+    SignStreak: 7,
+    TodaySigned: true,
+  }).nextLevelExperience, null);
+
+  const baseProfile = decodeUserProfile({
+    Id: 43,
+    RegisterAt: '',
+    Growth: { ComicQuota: 0, ComicQuotaToday: 0 },
+  });
+  assert.equal(baseProfile.registeredAt, null);
+  assert.equal(baseProfile.growth.experience, 0);
+  assert.equal(baseProfile.growth.comicQuota, 0);
+  assert.equal(baseProfile.growth.comicQuotaToday, 0);
+  assert.equal(baseProfile.growth.signedToday, false);
+  assert.throws(
+    () => decodeUserProfile({ Id: 43, Growth: { ComicQuota: 0 } }),
+    /invalid number field/,
+  );
+  assert.throws(
+    () => decodeUserProfile({ Id: 43, Growth: { ComicQuotaToday: 0 } }),
+    /invalid number field/,
+  );
+});
+
+test('decodes reset invite code and shop payloads', () => {
+  assert.deepEqual(decodeResetInviteCodeResult({ InviteCode: 'NEW-CODE' }), {
+    inviteCode: 'NEW-CODE',
+  });
+  assert.deepEqual(decodePointLogPage({
+    TotalPages: 2,
+    Page: 1,
+    Data: [{
+      Source: 'SignIn',
+      SourceLabel: '签到',
+      Amount: 5,
+      Balance: 101,
+      RefId: null,
+      OccurredAt: '2026-08-30T12:00:00.000Z',
+    }],
+  }), {
+    totalPages: 2,
+    page: 1,
+    items: [{
+      source: 'SignIn',
+      sourceLabel: '签到',
+      amount: 5,
+      balance: 101,
+      refId: null,
+      occurredAt: '2026-08-30T12:00:00.000Z',
+    }],
+  });
+  assert.throws(() => decodePointLogPage({
+    TotalPages: 1,
+    Page: 1,
+    Data: [{
+      Source: 'ComicRead', Amount: -1, Balance: 100, RefId: 7,
+      OccurredAt: '2026-08-30T12:00:00.000Z',
+    }],
+  }), /invalid text field/);
+  assert.throws(() => decodePointLogPage({
+    TotalPages: 1,
+    Page: 1,
+    Data: [{
+      Source: 'ComicRead', SourceLabel: '', Amount: -1, Balance: 100, RefId: 7,
+      OccurredAt: '2026-08-30T12:00:00.000Z',
+    }],
+  }), /invalid text field/);
+  assert.throws(() => decodePointLogPage({
+    TotalPages: 1,
+    Page: 1,
+    Data: [{ Source: 'SignIn', SourceLabel: '签到', Amount: 5, Balance: 101 }],
+  }), /invalid text field/);
+  assert.deepEqual(decodeShopData({
+    Coin: 96,
+    Items: [{
+      Key: 'sign_makeup',
+      Name: '补签卡',
+      Description: '补签一天',
+      Image: '/images/sign-makeup.png',
+      Price: 20,
+      Owned: 2,
+      MonthlyLimit: 5,
+      MonthlyPurchased: 1,
+    }],
+  }), {
+    coin: 96,
+    items: [{
+      key: 'sign_makeup',
+      name: '补签卡',
+      description: '补签一天',
+      image: '/images/sign-makeup.png',
+      price: 20,
+      owned: 2,
+      monthlyLimit: 5,
+      monthlyPurchased: 1,
+    }],
+  });
+  assert.equal(decodeShopData({
+    Coin: 96,
+    Items: [{
+      Key: 'comic_quota_50', Name: '漫画额度卡', Description: '', Image: '',
+      Price: 20, Owned: 1, MonthlyLimit: null, MonthlyPurchased: 0,
+    }],
+  }).items[0].monthlyLimit, null);
+  assert.equal(decodeShopData({
+    Coin: 96,
+    Items: [{
+      Key: 'comic_quota_50', Name: '漫画额度卡', Description: '', Image: '',
+      Price: 20, Owned: 1, MonthlyPurchased: 0,
+    }],
+  }).items[0].monthlyLimit, null);
+  assert.equal(decodeShopData({
+    Coin: 96,
+    Items: [{
+      Key: 'unavailable', Name: '暂不可购买', Description: '', Image: '',
+      Price: 20, Owned: 0, MonthlyLimit: 0, MonthlyPurchased: 0,
+    }],
+  }).items[0].monthlyLimit, 0);
+  assert.deepEqual(decodeOwnedShopItemsData({ Items: [] }), { items: [] });
+  assert.deepEqual(decodeBuyShopItemResult({
+    Key: 'sign_makeup',
+    Owned: 3,
+    Coin: 76,
+    Cost: 20,
+    MonthlyPurchased: 2,
+  }), {
+    key: 'sign_makeup',
+    owned: 3,
+    coin: 76,
+    cost: 20,
+    monthlyPurchased: 2,
+  });
+  assert.deepEqual(decodeUseSignMakeupCardResult({
+    Date: '2026-08-01',
+    Streak: 8,
+    Reward: 12,
+    CoinReward: 3,
+    Owned: 1,
+  }), {
+    date: '2026-08-01',
+    streak: 8,
+    reward: 12,
+    coinReward: 3,
+    owned: 1,
+  });
+  assert.deepEqual(decodeUseComicQuotaCardResult({
+    Key: 'comic_quota_50',
+    Granted: 50,
+    Quota: 125,
+    Owned: 1,
+  }), {
+    key: 'comic_quota_50',
+    granted: 50,
+    quota: 125,
+    owned: 1,
+  });
+  assert.deepEqual(decodeSignInCalendar({
+    Year: 2026,
+    Month: 8,
+    Days: [{ SignDate: '2026-08-01', Streak: 7, Reward: 5 }],
+  }), {
+    year: 2026,
+    month: 8,
+    days: [{ date: '2026-08-01', streak: 7, reward: 5 }],
+  });
+  assert.throws(() => decodeResetInviteCodeResult({ InviteCode: '' }), /invalid text field/);
+  assert.throws(() => decodeShopData({
+    Coin: 96,
+    Items: [{ Key: 'item', Name: 'Item', Description: '', Image: '' }],
+  }), /invalid number field/);
+  assert.throws(() => decodeShopData({
+    Coin: 96,
+    Items: [{
+      Key: 'item', Name: 'Item', Description: null, Image: '', Price: 1,
+      Owned: 0, MonthlyLimit: 1, MonthlyPurchased: 0,
+    }],
+  }), /invalid text field/);
+});
+
+test('maps invite reset and shop operations to Web-Master Hub contracts', async () => {
+  const calls = [];
+  const client = new ApiClient(
+    { async request() { throw new Error('not used'); } },
+    {
+      async connect() {},
+      async close() {},
+      async invoke(method, args) {
+        calls.push({ method, args });
+        if (method === 'ResetInviteCode') {
+          return { Success: true, Response: { InviteCode: 'NEW-CODE' } };
+        }
+        if (method === 'GetShop') {
+          return { Success: true, Response: { Coin: 96, Items: [] } };
+        }
+        if (method === 'GetMyItems') {
+          return { Success: true, Response: { Items: [] } };
+        }
+        if (method === 'BuyShopItem') {
+          return { Success: true, Response: {
+            Key: 'sign_makeup', Owned: 1, Coin: 76, Cost: 20, MonthlyPurchased: 1,
+          } };
+        }
+        if (method === 'UseSignMakeupCard') {
+          return { Success: true, Response: {
+            Date: '2026-08-01', Streak: 8, Reward: 12, CoinReward: 3, Owned: 0,
+          } };
+        }
+        if (method === 'UseComicQuotaCard') {
+          return { Success: true, Response: {
+            Key: 'comic_quota_50', Granted: 50, Quota: 125, Owned: 1,
+          } };
+        }
+        if (method === 'GetSignInCalendar') {
+          return { Success: true, Response: {
+            Year: 2026, Month: 8, Days: [{ SignDate: '2026-08-01', Streak: 7, Reward: 5 }],
+          } };
+        }
+        if (method === 'GetPointLog' || method === 'GetCoinLog') {
+          return { Success: true, Response: {
+            TotalPages: 1, Page: 1, Data: [{
+              Source: 'SignIn', SourceLabel: '签到', Amount: 5, Balance: 101, RefId: null,
+              OccurredAt: '2026-08-30T12:00:00.000Z',
+            }],
+          } };
+        }
+        return { Success: true, Response: null };
+      },
+    },
+    null,
+    new RateLimitRequestScheduler(20, 10),
+  );
+
+  assert.deepEqual(await client.resetInviteCode(), { inviteCode: 'NEW-CODE' });
+  assert.deepEqual(await client.getShop(), { coin: 96, items: [] });
+  assert.deepEqual(await client.getMyShopItems(), { items: [] });
+  assert.deepEqual(await client.buyShopItem({ key: 'sign_makeup', quantity: 1 }), {
+    key: 'sign_makeup', owned: 1, coin: 76, cost: 20, monthlyPurchased: 1,
+  });
+  assert.deepEqual(await client.useSignMakeupCard({ date: '2026-08-01' }), {
+    date: '2026-08-01', streak: 8, reward: 12, coinReward: 3, owned: 0,
+  });
+  assert.deepEqual(await client.useComicQuotaCard(), {
+    key: 'comic_quota_50', granted: 50, quota: 125, owned: 1,
+  });
+  assert.deepEqual(await client.getSignInCalendar(2026, 8), {
+    year: 2026, month: 8, days: [{ date: '2026-08-01', streak: 7, reward: 5 }],
+  });
+  assert.deepEqual(await client.getPointLog(1, 20), {
+    totalPages: 1,
+    page: 1,
+    items: [{
+      source: 'SignIn', sourceLabel: '签到', amount: 5, balance: 101, refId: null,
+      occurredAt: '2026-08-30T12:00:00.000Z',
+    }],
+  });
+  assert.deepEqual(await client.getCoinLog(2, 10), {
+    totalPages: 1,
+    page: 1,
+    items: [{
+      source: 'SignIn', sourceLabel: '签到', amount: 5, balance: 101, refId: null,
+      occurredAt: '2026-08-30T12:00:00.000Z',
+    }],
+  });
+  assert.deepEqual(calls, [
+    { method: 'ResetInviteCode', args: [{}, { UseGzip: true }] },
+    { method: 'GetShop', args: [{}, { UseGzip: true }] },
+    { method: 'GetMyItems', args: [{}, { UseGzip: true }] },
+    { method: 'BuyShopItem', args: [{ Key: 'sign_makeup', Quantity: 1 }, { UseGzip: true }] },
+    { method: 'UseSignMakeupCard', args: [{ Date: '2026-08-01' }, { UseGzip: true }] },
+    { method: 'UseComicQuotaCard', args: [{}, { UseGzip: true }] },
+    { method: 'GetSignInCalendar', args: [{ Year: 2026, Month: 8 }, { UseGzip: true }] },
+    { method: 'GetPointLog', args: [{ Page: 1, Size: 20 }, { UseGzip: true }] },
+    { method: 'GetCoinLog', args: [{ Page: 2, Size: 10 }, { UseGzip: true }] },
+  ]);
 });
 
 test('maps profile, avatar, and check-in to Web-Master Hub contracts', async () => {
@@ -116,7 +466,14 @@ test('maps profile, avatar, and check-in to Web-Master Hub contracts', async () 
       async invoke(method, args) {
         calls.push({ method, args });
         if (method === 'GetMyInfo') {
-          return { Success: true, Response: { Id: 8, UserName: 'reader' } };
+          return {
+            Success: true,
+            Response: {
+              Id: 8,
+              UserName: 'reader',
+              Growth: { ComicQuota: 75, ComicQuotaToday: 12 },
+            },
+          };
         }
         if (method === 'SignIn') {
           return { Success: true, Response: { Reward: 5, Streak: 2, Exp: 20, Level: 1 } };
@@ -141,6 +498,69 @@ test('maps profile, avatar, and check-in to Web-Master Hub contracts', async () 
     { method: 'SetAvatar', args: [{ Url: 'https://cdn.example/avatar.png' }, { UseGzip: true }] },
     { method: 'SignIn', args: [{}, { UseGzip: true }] },
   ]);
+});
+
+test('fetches a public user summary through the exact REST route', async () => {
+  const calls = [];
+  const response = {
+    Id: 8,
+    UserName: 'reader',
+    Avatar: '',
+    Role: 'Member',
+    Level: 2,
+    RegisterAt: '2026-01-02T00:00:00.000Z',
+    BookCount: 1,
+    CommunityThreadCount: 2,
+    CommunityReplyCount: 3,
+    CommentCount: 4,
+  };
+  const client = new ApiClient(
+    {
+      async request(request) {
+        calls.push(request);
+        return { body: { Success: true, Response: response }, headers: {}, status: 200 };
+      },
+    },
+    { async connect() {}, async close() {}, async invoke() { throw new Error('not used'); } },
+    null,
+    new RateLimitRequestScheduler(20, 10),
+  );
+
+  assert.equal((await client.getPublicUserSummary(8)).userName, 'reader');
+  assert.deepEqual(calls, [{
+    headers: { Accept: 'application/json' },
+    method: 'GET',
+    url: 'https://api.lightnovel.life/api/user/summary?id=8',
+  }]);
+  await assert.rejects(client.getPublicUserSummary(0), /valid user id/);
+});
+
+test('decodes comic-series uploader ids for public-profile navigation', () => {
+  const detail = decodeComicSeriesDetail({
+    Series: {
+      Id: 'series-1', Title: 'Series', OriginalTitle: '', Cover: 'https://cdn.example/series.png',
+      Author: '', Views: 1, Favorite: 2, Introduction: '', CreatedAt: '2026-01-01T00:00:00.000Z',
+      LastUpdatedChapter: '', LastUpdatedAt: '2026-01-02T00:00:00.000Z', Extra: {},
+    },
+    Books: [{
+      Id: 3, Title: 'Volume 1', Uploader: { Id: 8, UserName: 'reader', Avatar: '' },
+      Cover: 'https://cdn.example/volume.png', CreatedAt: '2026-01-01T00:00:00.000Z',
+      LastUpdatedChapter: '', LastUpdatedAt: '2026-01-02T00:00:00.000Z', ReadPosition: null, Chapters: [],
+    }],
+  });
+
+  assert.equal(detail.volumes[0].uploader.id, 8);
+  assert.throws(() => decodeComicSeriesDetail({
+    Series: {
+      Id: 'series-1', Title: 'Series', Cover: 'https://cdn.example/series.png',
+      CreatedAt: '2026-01-01T00:00:00.000Z', LastUpdatedAt: '2026-01-02T00:00:00.000Z',
+    },
+    Books: [{
+      Id: 3, Title: 'Volume 1', Uploader: { UserName: 'reader', Avatar: '' },
+      Cover: 'https://cdn.example/volume.png', CreatedAt: '2026-01-01T00:00:00.000Z',
+      LastUpdatedAt: '2026-01-02T00:00:00.000Z', Chapters: [],
+    }],
+  }), /invalid number/);
 });
 
 test('decodes Web-Master comic info and preserves the reader position', () => {
@@ -169,6 +589,41 @@ test('decodes Web-Master comic info and preserves the reader position', () => {
   assert.equal(info.classification.author, 'Classified author');
   assert.equal(info.chapters[0].pageCount, 3);
   assert.deepEqual(info.readPosition, { chapterId: 100, position: '2' });
+});
+
+test('requests comic content in six-page batches by default', async () => {
+  const calls = [];
+  const client = new ApiClient(
+    { async request() { throw new Error('not used'); } },
+    {
+      async connect() {},
+      async close() {},
+      async invoke(method, args) {
+        calls.push({ method, args });
+        return { Success: true, Response: {
+          Chapter: {
+            Id: 100,
+            BookId: 12,
+            BookName: 'Comic',
+            Title: 'Chapter 1',
+            SortNum: 1,
+            Total: 20,
+            Skip: 0,
+            Images: [],
+          },
+          ReadPosition: null,
+        } };
+      },
+    },
+    null,
+    new RateLimitRequestScheduler(20, 10),
+  );
+
+  await client.getComicContent({ chapterId: 100 });
+  assert.deepEqual(calls, [{
+    method: 'GetComicContent',
+    args: [{ Cid: 100, Skip: 0, Take: 6 }, { UseGzip: true }],
+  }]);
 });
 
 test('maps novel and comic search to their Web-Master Hub contracts', async () => {
@@ -277,7 +732,74 @@ test('maps novel and comic search to their Web-Master Hub contracts', async () =
   ]);
 });
 
-test('maps comic comments to the official Web series Hub contract', async () => {
+test('keeps valid comments when a paged response has sparse commentary maps', () => {
+  const page = decodeCommentPage({
+    Page: 2,
+    TotalPages: 3,
+    Users: {
+      '4': { Id: 4, UserName: 'reader', Avatar: '' },
+      '5': { Id: 5, UserName: 'reply-author', Avatar: '' },
+    },
+    Commentaries: {
+      '20': {
+        UserId: 4,
+        Content: 'Second page comment',
+        CreatedAt: '2026-08-30T12:00:00.000Z',
+        CanEdit: false,
+      },
+      '21': {
+        UserId: 5,
+        Content: 'Reply with a missing target',
+        CreatedAt: '2026-08-30T12:01:00.000Z',
+        CanEdit: false,
+        ReplyId: 999,
+      },
+    },
+    Data: [
+      { Id: 20, Reply: [21, 22] },
+      { Id: 30, Reply: [] },
+    ],
+  });
+
+  assert.deepEqual(page.items.map(({ id }) => id), [20]);
+  assert.equal(page.items[0].replies.length, 1);
+  assert.equal(page.items[0].replies[0].replyToUser, null);
+});
+
+test('decodes a later Web-Master comment page without losing its page metadata', () => {
+  const page = decodeCommentPage({
+    Page: 2,
+    TotalPages: 3,
+    Users: {
+      '4': { Id: 4, UserName: 'reader', Avatar: '' },
+      '5': { Id: 5, UserName: 'reply-author', Avatar: '' },
+    },
+    Commentaries: {
+      '20': {
+        UserId: 4,
+        Content: 'Second page comment',
+        CreatedAt: '2026-08-30T12:00:00.000Z',
+        CanEdit: false,
+      },
+      '21': {
+        UserId: 5,
+        Content: 'Reply on second page',
+        CreatedAt: '2026-08-30T12:01:00.000Z',
+        CanEdit: false,
+        ReplyId: 20,
+      },
+    },
+    Data: [{ Id: 20, Reply: [21] }],
+  });
+
+  assert.equal(page.page, 2);
+  assert.equal(page.totalPages, 3);
+  assert.equal(page.items[0].id, 20);
+  assert.equal(page.items[0].replies[0].id, 21);
+  assert.equal(page.items[0].replies[0].replyToUser?.id, 4);
+});
+
+test('maps comic comments to the current Book comment Hub contract', async () => {
   const calls = [];
   const client = new ApiClient(
     { async request() { throw new Error('not used'); } },
@@ -289,7 +811,13 @@ test('maps comic comments to the official Web series Hub contract', async () => 
         return {
           Success: true,
           Response: method === 'GetComments'
-            ? { Page: 1, TotalPages: 0, Users: {}, Commentaries: {}, Data: [] }
+            ? {
+                Page: args[0].Page,
+                TotalPages: 2,
+                Users: {},
+                Commentaries: {},
+                Data: [],
+              }
             : null,
         };
       },
@@ -297,9 +825,10 @@ test('maps comic comments to the official Web series Hub contract', async () => 
     null,
     new RateLimitRequestScheduler(20, 10),
   );
-  const target = { type: 'Series', id: 0, seriesTitle: 'Comic series' };
+  const target = { type: 'Book', id: 42 };
 
-  await client.getComments({ ...target, page: 1 });
+  const firstPage = await client.getComments({ ...target, page: 1 });
+  const secondPage = await client.getComments({ ...target, page: 2 });
   await client.postComment({ ...target, content: 'Root comment' });
   await client.replyComment({
     ...target,
@@ -308,36 +837,24 @@ test('maps comic comments to the official Web series Hub contract', async () => 
     replyId: 8,
   });
 
+  assert.equal(firstPage.page, 1);
+  assert.equal(secondPage.page, 2);
   assert.deepEqual(calls, [
     {
       method: 'GetComments',
-      args: [{
-        Type: 'Series',
-        Id: 0,
-        Page: 1,
-        Size: 10,
-        SeriesTitle: 'Comic series',
-      }, { UseGzip: true }],
+      args: [{ Type: 'Book', Id: 42, Page: 1, Size: 10 }, { UseGzip: true }],
+    },
+    {
+      method: 'GetComments',
+      args: [{ Type: 'Book', Id: 42, Page: 2, Size: 10 }, { UseGzip: true }],
     },
     {
       method: 'PostComment',
-      args: [{
-        Type: 'Series',
-        Id: 0,
-        Content: 'Root comment',
-        SeriesTitle: 'Comic series',
-      }, { UseGzip: true }],
+      args: [{ Type: 'Book', Id: 42, Content: 'Root comment' }, { UseGzip: true }],
     },
     {
       method: 'ReplyComment',
-      args: [{
-        Type: 'Series',
-        Id: 0,
-        Content: 'Reply',
-        SeriesTitle: 'Comic series',
-        ParentId: 7,
-        ReplyId: 8,
-      }, { UseGzip: true }],
+      args: [{ Type: 'Book', Id: 42, Content: 'Reply', ParentId: 7, ReplyId: 8 }, { UseGzip: true }],
     },
   ]);
 });
@@ -884,22 +1401,32 @@ test('decodes Community home, nested replies, nullable metadata, and missing thr
     ...item,
     Liked: true,
     Favorited: false,
-    BodyHtml: '<p>Hello</p>',
+    EditedAt: '2026-08-30T12:00:00.000Z',
+    CanEdit: true,
+    Content: '<p>Hello</p>',
     RepliesPage: { Page: 1, Size: 5, Total: 1, TotalPages: 1, HasMore: false },
     ReplyItems: [{
       Id: 10,
+      AuthorId: 4,
       AuthorName: 'Reply author',
       AuthorBadge: '',
       Content: 'Reply',
       Likes: 1,
       Liked: true,
+      CanDelete: true,
       ReplyTo: { Id: 9, AuthorName: '', AuthorIsDeleted: true },
       ChildReplies: [],
       ChildPage: { Page: 1, Size: 3, Total: 0, TotalPages: 0, HasMore: false },
     }],
     RelatedThreads: [],
   });
+  assert.equal(home.feed[0].authorId, 7);
+  assert.equal(thread.replyItems[0].authorId, 4);
   assert.equal(thread.replyItems[0].authorBadge, null);
+  assert.equal(thread.replyItems[0].canDelete, true);
+  assert.equal(thread.canEdit, true);
+  assert.equal(thread.editedAt, '2026-08-30T12:00:00.000Z');
+  assert.equal(thread.content, '<p>Hello</p>');
   assert.equal(thread.replyItems[0].replyTo.authorIsDeleted, true);
   assert.equal(decodeCommunityThread(null), null);
   assert.equal(decodeCommunityThread({}), null);
@@ -910,7 +1437,7 @@ test('maps every Community and notification operation to the gzip Hub contract',
   const feedItem = communityFeedItem();
   const thread = {
     ...feedItem,
-    BodyHtml: '<p>Body</p>',
+    Content: '<p>Body</p>',
     RepliesPage: { Page: 1, Size: 5, Total: 0, TotalPages: 0, HasMore: false },
     ReplyItems: [],
     RelatedThreads: [],
@@ -929,8 +1456,16 @@ test('maps every Community and notification operation to the gzip Hub contract',
           },
           GetCommunityFeed: { SubCategories: [], Feed: [] },
           GetCommunityThread: thread,
+          GetCommunityThreadEditInfo: {
+            Id: 3, BoardKey: 'general', SubCategoryKey: 'news', Title: 'A title',
+            Content: '<p>Body</p>', Format: 'html',
+          },
+          UpdateCommunityThread: { Id: 3 },
+          DeleteCommunityThread: { Id: 3 },
+          SetCommunityThreadLocked: { Id: 3, Locked: true },
+          DeleteCommunityReply: { Id: 4, Removed: 1 },
           CreateCommunityThread: thread,
-          CreateCommunityReply: { Id: 4, Content: 'reply' },
+          CreateCommunityReply: { Id: 4, AuthorId: 7, Content: 'reply' },
           ToggleCommunityThreadLike: { Liked: true, Likes: 2 },
           ToggleCommunityThreadFavorite: { Favorited: true, Favorites: 3 },
           ToggleCommunityReplyLike: { Liked: false, Likes: 1 },
@@ -948,13 +1483,23 @@ test('maps every Community and notification operation to the gzip Hub contract',
 
   await client.getCommunityHome();
   await client.getCommunityFeed({ boardKey: 'general', order: 'hot', scope: 'week', page: 2, size: 7 });
-  await client.getCommunityThread({ threadId: 3, replyPage: 2, trackView: false });
+  await client.getCommunityThread({ threadId: 3, replyPage: 2, trackView: false, focusReplyId: 9 });
+  assert.deepEqual(await client.getCommunityThreadEditInfo(3), {
+    id: 3, boardKey: 'general', subCategoryKey: 'news', title: 'A title',
+    content: '<p>Body</p>', format: 'html',
+  });
+  assert.deepEqual(await client.updateCommunityThread({
+    threadId: 3, boardKey: 'general', subCategoryKey: 'news', title: 'A title', contentHtml: '<p>Body</p>',
+  }), { id: 3 });
+  assert.deepEqual(await client.deleteCommunityThread(3), { id: 3 });
+  assert.deepEqual(await client.setCommunityThreadLocked(3, true), { id: 3, locked: true });
+  assert.deepEqual(await client.deleteCommunityReply(4), { id: 4, removed: 1 });
   await client.createCommunityThread({ boardKey: 'general', title: 'A title', contentHtml: '<p>Body</p>' });
   await client.createCommunityReply({ threadId: 3, content: 'reply', replyToId: 4 });
   assert.deepEqual(await client.toggleCommunityThreadLike(3), { liked: true, likes: 2 });
   assert.deepEqual(await client.toggleCommunityThreadFavorite(3), { favorited: true, favorites: 3 });
   assert.deepEqual(await client.toggleCommunityReplyLike(4), { liked: false, likes: 1 });
-  await client.getCommunityReplyChildren({ threadId: 3, parentReplyId: 4, page: 2 });
+  await client.getCommunityReplyChildren({ threadId: 3, parentReplyId: 4, page: 2, afterReplyId: 8 });
   await client.getMyCommunityOverview();
   await client.getNotifications();
   await client.markNotifications([7, 8]);
@@ -963,6 +1508,11 @@ test('maps every Community and notification operation to the gzip Hub contract',
     'GetCommunityHome',
     'GetCommunityFeed',
     'GetCommunityThread',
+    'GetCommunityThreadEditInfo',
+    'UpdateCommunityThread',
+    'DeleteCommunityThread',
+    'SetCommunityThreadLocked',
+    'DeleteCommunityReply',
     'CreateCommunityThread',
     'CreateCommunityReply',
     'ToggleCommunityThreadLike',
@@ -980,50 +1530,115 @@ test('maps every Community and notification operation to the gzip Hub contract',
     BoardKey: 'general', SubCategoryKey: '', Order: 'hot', Scope: 'week', Page: 2, Size: 7,
   });
   assert.deepEqual(calls[2].args[0], {
-    ThreadId: 3, ReplyPage: 2, ReplySize: 5, TrackView: false,
+    ThreadId: 3, ReplyPage: 2, ReplySize: 5, TrackView: false, FocusReplyId: 9,
   });
-  assert.deepEqual(calls[4].args[0], { ThreadId: 3, Content: 'reply', ReplyToId: 4 });
-  assert.deepEqual(calls[8].args[0], { ThreadId: 3, ParentReplyId: 4, Page: 2, Size: 3 });
-  assert.deepEqual(calls[10].args[0], { Page: 1, Size: 20 });
-  assert.deepEqual(calls[11].args[0], { Ids: [7, 8] });
+  assert.deepEqual(calls[3].args[0], { ThreadId: 3, Format: 'html' });
+  assert.deepEqual(calls[4].args[0], {
+    ThreadId: 3, BoardKey: 'general', SubCategoryKey: 'news',
+    Title: 'A title', ContentHtml: '<p>Body</p>',
+  });
+  assert.deepEqual(calls[5].args[0], { ThreadId: 3 });
+  assert.deepEqual(calls[6].args[0], { ThreadId: 3, Locked: true });
+  assert.deepEqual(calls[7].args[0], { ReplyId: 4 });
+  assert.deepEqual(calls[8].args[0], {
+    BoardKey: 'general', SubCategoryKey: '', Title: 'A title', ContentHtml: '<p>Body</p>',
+  });
+  assert.deepEqual(calls[9].args[0], { ThreadId: 3, Content: 'reply', ReplyToId: 4 });
+  assert.deepEqual(calls[13].args[0], {
+    ThreadId: 3, ParentReplyId: 4, Page: 2, Size: 3, AfterReplyId: 8,
+  });
+  assert.deepEqual(calls[15].args[0], { Page: 1, Size: 20 });
+  assert.deepEqual(calls[16].args[0], { Ids: [7, 8] });
 });
 
-test('decodes notification reply focus, Series targets, and unknown future kinds safely', () => {
+test('decodes the Web-Master notification contract and safely degrades tone', () => {
   const page = decodeAppNotificationPage({
     Page: 2,
     TotalPages: 3,
     Data: [{
       Id: 9,
       Actor: { Id: 5, UserName: 'Reader', Avatar: '' },
-      Type: 'CommunityThreadChildReply',
-      ObjectType: 'Series',
-      ObjectId: 22,
-      IsRead: false,
-      CreatedAt: '',
-      Extra: {
-        object_id: 22,
-        object_title: 'Thread',
-        series_title: 'Series name',
-        preview: 'Preview',
-        reply_id: 30,
-        parent_reply_id: 29,
-        reply_to_reply_id: null,
-        reply_preview: '',
+      Kind: 'community.reply',
+      SchemaVersion: 1,
+      Title: '有人回复了你的主题',
+      Body: '请查看新的回复。',
+      Tone: 'info',
+      Action: {
+        Type: 'open_community_thread',
+        Data: { thread_id: 22, reply_id: 30 },
       },
+      Data: { thread_id: 22, reply_id: 30 },
+      IsRead: false,
+      ReadAt: null,
+      CreatedAt: '2026-08-30T12:00:00.000Z',
     }, {
       Id: 10,
-      Type: 'FutureNotification',
-      ObjectType: 'FutureObject',
-      Extra: {},
+      Actor: null,
+      Kind: 'future.notification',
+      SchemaVersion: 7,
+      Title: '未来通知',
+      Body: '',
+      Tone: 'future-tone',
+      Action: null,
+      Data: {},
+      IsRead: true,
+      ReadAt: '2026-08-29T12:00:00.000Z',
+      CreatedAt: '2026-08-30T13:00:00.000Z',
     }],
   });
 
-  assert.equal(page.items[0].objectType, 'Series');
-  assert.equal(page.items[0].extra.replyId, 30);
-  assert.equal(page.items[0].extra.parentReplyId, 29);
-  assert.equal(page.items[0].extra.replyPreview, null);
-  assert.equal(page.items[1].type, 'Unknown');
-  assert.equal(page.items[1].objectType, 'Unknown');
+  assert.deepEqual(page.items[0], {
+    id: 9,
+    actor: { id: 5, userName: 'Reader', avatar: '' },
+    kind: 'community.reply',
+    schemaVersion: 1,
+    title: '有人回复了你的主题',
+    body: '请查看新的回复。',
+    tone: 'info',
+    action: {
+      type: 'open_community_thread',
+      data: { thread_id: 22, reply_id: 30 },
+    },
+    data: { thread_id: 22, reply_id: 30 },
+    isRead: false,
+    readAt: null,
+    createdAt: '2026-08-30T12:00:00.000Z',
+  });
+  assert.equal(page.items[1].kind, 'future.notification');
+  assert.equal(page.items[1].tone, 'neutral');
+  assert.equal(page.items[1].action, null);
+  assert.equal(page.items[1].body, '');
+  assert.throws(() => decodeAppNotificationPage({
+    Page: 1,
+    TotalPages: 1,
+    Data: [{
+      Id: 1,
+      Actor: null,
+      Type: 'Comment',
+      ObjectType: 'Book',
+      Action: null,
+      Data: {},
+      Extra: {},
+    }],
+  }), /invalid text field/);
+  assert.throws(() => decodeAppNotificationPage({
+    Page: 1,
+    TotalPages: 1,
+    Data: [{
+      Id: 1,
+      Actor: null,
+      Kind: 'kind',
+      SchemaVersion: 1,
+      Title: 'Title',
+      Body: '',
+      Tone: 'neutral',
+      Action: null,
+      Data: null,
+      IsRead: false,
+      ReadAt: null,
+      CreatedAt: '2026-08-30T12:00:00.000Z',
+    }],
+  }), /Invalid notification data/);
 });
 
 function communityFeedItem(overrides = {}) {
@@ -1035,6 +1650,7 @@ function communityFeedItem(overrides = {}) {
     SubCategoryLabel: 'News',
     Title: 'Hello',
     Excerpt: 'Excerpt',
+    AuthorId: 7,
     AuthorName: 'Reader',
     AuthorIsDeleted: false,
     AuthorAvatar: '',
@@ -1051,123 +1667,3 @@ function communityFeedItem(overrides = {}) {
     ...overrides,
   };
 }
-
-test('maps sign calendar, makeup cards, and point logs to Web-Master Hub contracts', async () => {
-  const calls = [];
-  const client = new ApiClient(
-    { async request() { throw new Error('not used'); } },
-    {
-      async connect() {},
-      async close() {},
-      async invoke(method, args) {
-        calls.push({ method, args });
-        if (method === 'GetSignInCalendar') {
-          return { Success: true, Response: { Year: 2026, Month: 8, Days: [{ SignDate: '2026-08-01', Streak: 3, Reward: 5 }] } };
-        }
-        if (method === 'GetMyItems') {
-          return { Success: true, Response: { Items: [{ Key: 'sign_makeup', Quantity: 2 }] } };
-        }
-        if (method === 'UseSignMakeupCard') {
-          return { Success: true, Response: { Owned: 1, Streak: 4 } };
-        }
-        if (method === 'GetPointLog' || method === 'GetCoinLog') {
-          return { Success: true, Response: { TotalPages: 2, Page: 1, Data: [{ Source: 'SignIn', Amount: 5, Balance: 100, RefId: null, OccurredAt: '2026-08-01T00:00:00.000Z' }] } };
-        }
-        return { Success: true, Response: null };
-      },
-    },
-    null,
-    new RateLimitRequestScheduler(20, 10),
-  );
-
-  assert.deepEqual(await client.getSignInCalendar(2026, 8), {
-    year: 2026,
-    month: 8,
-    days: [{ signDate: '2026-08-01', streak: 3, reward: 5 }],
-  });
-  assert.deepEqual(await client.getMyItems(), {
-    items: [{ key: 'sign_makeup', name: '', description: '', image: '', quantity: 2 }],
-  });
-  assert.deepEqual(await client.useSignMakeupCard('2026-08-01'), { owned: 1, streak: 4 });
-  assert.deepEqual(await client.getPointLog(1, 20), {
-    totalPages: 2,
-    page: 1,
-    data: [{ source: 'SignIn', amount: 5, balance: 100, refId: null, occurredAt: '2026-08-01T00:00:00.000Z' }],
-  });
-  assert.deepEqual(await client.getCoinLog(1, 20), {
-    totalPages: 2,
-    page: 1,
-    data: [{ source: 'SignIn', amount: 5, balance: 100, refId: null, occurredAt: '2026-08-01T00:00:00.000Z' }],
-  });
-
-  assert.deepEqual(calls, [
-    { method: 'GetSignInCalendar', args: [{ Year: 2026, Month: 8 }, { UseGzip: true }] },
-    { method: 'GetMyItems', args: [{}, { UseGzip: true }] },
-    { method: 'UseSignMakeupCard', args: [{ Date: '2026-08-01' }, { UseGzip: true }] },
-    { method: 'GetPointLog', args: [{ Page: 1, Size: 20 }, { UseGzip: true }] },
-    { method: 'GetCoinLog', args: [{ Page: 1, Size: 20 }, { UseGzip: true }] },
-  ]);
-});
-
-test('maps shop shelf, owned items, purchase, and quota use to Web-Master Hub contracts', async () => {
-  const calls = [];
-  const client = new ApiClient(
-    { async request() { throw new Error('not used'); } },
-    {
-      async connect() {},
-      async close() {},
-      async invoke(method, args) {
-        calls.push({ method, args });
-        if (method === 'GetShop') {
-          return { Success: true, Response: { Coin: 120, Items: [
-            { Key: 'sign_makeup', Name: '补签卡', Description: '补签', Image: '/img/makeup.png', Price: 100, Owned: 2, MonthlyLimit: 3, MonthlyPurchased: 1 },
-            { Key: 'comic_quota_50', Name: '漫画额度卡', Description: '获得漫画额度', Image: '/img/quota.png', Price: 50, Owned: 1, MonthlyPurchased: 0 },
-          ] } };
-        }
-        if (method === 'GetMyItems') {
-          return { Success: true, Response: { Items: [{ Key: 'sign_makeup', Name: '补签卡', Description: '补签', Image: '/img/makeup.png', Quantity: 2 }] } };
-        }
-        if (method === 'BuyShopItem') {
-          return { Success: true, Response: { Key: 'sign_makeup', Owned: 3, Coin: 20, Cost: 100, MonthlyPurchased: 2 } };
-        }
-        if (method === 'UseComicQuotaCard') {
-          return { Success: true, Response: { Key: 'comic_quota_50', Granted: 50, Quota: 75, Owned: 0 } };
-        }
-        return { Success: true, Response: null };
-      },
-    },
-    null,
-    new RateLimitRequestScheduler(20, 10),
-  );
-
-  assert.deepEqual(await client.getShop(), {
-    coin: 120,
-    items: [
-      { key: 'sign_makeup', name: '补签卡', description: '补签', image: '/img/makeup.png', price: 100, owned: 2, monthlyLimit: 3, monthlyPurchased: 1 },
-      { key: 'comic_quota_50', name: '漫画额度卡', description: '获得漫画额度', image: '/img/quota.png', price: 50, owned: 1, monthlyLimit: null, monthlyPurchased: 0 },
-    ],
-  });
-  assert.deepEqual(await client.getMyItems(), {
-    items: [{ key: 'sign_makeup', name: '补签卡', description: '补签', image: '/img/makeup.png', quantity: 2 }],
-  });
-  assert.deepEqual(await client.buyShopItem('sign_makeup', 1), {
-    key: 'sign_makeup',
-    owned: 3,
-    coin: 20,
-    cost: 100,
-    monthlyPurchased: 2,
-  });
-  assert.deepEqual(await client.useComicQuotaCard(), {
-    key: 'comic_quota_50',
-    granted: 50,
-    quota: 75,
-    owned: 0,
-  });
-
-  assert.deepEqual(calls, [
-    { method: 'GetShop', args: [{}, { UseGzip: true }] },
-    { method: 'GetMyItems', args: [{}, { UseGzip: true }] },
-    { method: 'BuyShopItem', args: [{ Key: 'sign_makeup', Quantity: 1 }, { UseGzip: true }] },
-    { method: 'UseComicQuotaCard', args: [{}, { UseGzip: true }] },
-  ]);
-});

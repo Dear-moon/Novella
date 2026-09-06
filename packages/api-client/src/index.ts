@@ -1,4 +1,4 @@
-import type {
+﻿import type {
   HttpRequest,
   HttpResponse,
   HttpTransport,
@@ -15,6 +15,7 @@ export const SERVICE_ENDPOINTS = Object.freeze({
   sendResetEmailPath: '/api/user/send_reset_email',
   resetPasswordPath: '/api/user/reset_password',
   refreshTokenPath: '/api/user/refresh_token',
+  publicUserSummaryPath: '/api/user/summary',
   signalRHub: 'https://api.lightnovel.life/hub/api',
 });
 
@@ -241,6 +242,9 @@ export interface BookSearchRequest {
 }
 
 export interface ComicSeriesListItem {
+  /** Concrete comic volume/book id used by GetBookInfo. */
+  bookId: number;
+  /** Stable display title for the grouped comic series. */
   id: number;
   title: string;
   originalTitle: string | null;
@@ -260,7 +264,7 @@ export interface ComicSeriesListPage {
  * novels and comics render through the same grid card. */
 export function comicToBookListItem(comic: ComicSeriesListItem): BookListItem {
   return {
-    id: comic.id,
+    id: comic.bookId,
     type: 'Comic',
     title: comic.title,
     seriesTitle: null,
@@ -308,6 +312,16 @@ export interface UserShelf {
 export interface BookChapter {
   id: number;
   title: string;
+  sortNum: number;
+  pageCount: number;
+  downloadCost: number;
+}
+
+export interface BookSeriesItem {
+  id: number;
+  title: string;
+  coverUrl: string;
+  coverPlaceholder: string | null;
 }
 
 export interface BookClassification {
@@ -334,6 +348,8 @@ export interface BookDetail {
   coverUrl: string;
   coverPlaceholder: string | null;
   title: string;
+  seriesTitle: string | null;
+  series: BookSeriesItem[];
   authorName: string | null;
   category: BookCategory | null;
   introduction: string;
@@ -343,6 +359,8 @@ export interface BookDetail {
   favoriteCount: number;
   viewCount: number;
   canEdit: boolean;
+  canDownload: boolean;
+  downloadCost: number;
   chapters: BookChapter[];
   user: BookDetailUser | null;
   classification: BookClassification;
@@ -413,6 +431,7 @@ export interface ComicSeriesVolume {
   id: number;
   title: string;
   uploader: {
+    id: number;
     userName: string;
     avatarUrl: string;
   };
@@ -458,6 +477,8 @@ export interface ComicContent {
   readPosition: BookReadPosition | null;
 }
 
+export const COMIC_CONTENT_BATCH_SIZE = 6;
+
 export interface ComicContentRequest {
   chapterId: number;
   skip?: number;
@@ -470,7 +491,7 @@ export interface SaveReadPositionRequest {
   position: string;
 }
 
-export type CommentTargetType = 'Book' | 'Announcement' | 'Series';
+export type CommentTargetType = 'Book' | 'Announcement';
 
 export interface CommentUser {
   id: number;
@@ -506,14 +527,12 @@ export interface GetCommentsRequest {
   type: CommentTargetType;
   id: number;
   page: number;
-  seriesTitle?: string;
 }
 
 export interface PostCommentRequest {
   type: CommentTargetType;
   id: number;
   content: string;
-  seriesTitle?: string;
   parentId?: number;
   replyId?: number;
 }
@@ -525,15 +544,45 @@ export interface OnlineInfo {
   dayRegister: number;
 }
 
+export interface PointLogItem {
+  source: string;
+  sourceLabel: string;
+  amount: number;
+  balance: number;
+  refId: number | null;
+  occurredAt: string;
+}
+
+export interface PointLogPage {
+  page: number;
+  totalPages: number;
+  items: PointLogItem[];
+}
+
 export interface UserGrowth {
   experience: number;
   coin: number;
+  comicQuota: number;
+  comicQuotaToday: number;
   level: number;
   growthLevel: number;
   currentLevelExperience: number;
   nextLevelExperience: number | null;
   signInStreak: number;
   signedToday: boolean;
+}
+
+export interface PublicUserSummary {
+  id: number;
+  userName: string;
+  avatarUrl: string;
+  role: string;
+  level: number;
+  registeredAt: string;
+  bookCount: number;
+  communityThreadCount: number;
+  communityReplyCount: number;
+  commentCount: number;
 }
 
 export interface UserProfile {
@@ -555,28 +604,8 @@ export interface DailyCheckInResult {
   level: number;
 }
 
-export interface SignInCalendarDay {
-  signDate: string;
-  streak: number;
-  reward: number;
-}
-
-export interface SignInCalendar {
-  year: number;
-  month: number;
-  days: SignInCalendarDay[];
-}
-
-export interface ShopOwnedItem {
-  key: string;
-  name: string;
-  description: string;
-  image: string;
-  quantity: number;
-}
-
-export interface ShopMyItems {
-  items: ShopOwnedItem[];
+export interface ResetInviteCodeResult {
+  inviteCode: string;
 }
 
 export interface ShopItem {
@@ -590,9 +619,26 @@ export interface ShopItem {
   monthlyPurchased: number;
 }
 
-export interface ShopInfo {
+export interface OwnedShopItem {
+  key: string;
+  name: string;
+  description: string;
+  image: string;
+  quantity: number;
+}
+
+export interface ShopData {
   coin: number;
   items: ShopItem[];
+}
+
+export interface OwnedShopItemsData {
+  items: OwnedShopItem[];
+}
+
+export interface BuyShopItemRequest {
+  key: string;
+  quantity: number;
 }
 
 export interface BuyShopItemResult {
@@ -603,9 +649,16 @@ export interface BuyShopItemResult {
   monthlyPurchased: number;
 }
 
-export interface SignMakeupCardResult {
-  owned: number;
+export interface UseSignMakeupCardRequest {
+  date: string;
+}
+
+export interface UseSignMakeupCardResult {
+  date: string;
   streak: number;
+  reward: number;
+  coinReward: number;
+  owned: number;
 }
 
 export interface UseComicQuotaCardResult {
@@ -615,18 +668,16 @@ export interface UseComicQuotaCardResult {
   owned: number;
 }
 
-export interface PointLogItem {
-  source: string;
-  amount: number;
-  balance: number;
-  refId: number | null;
-  occurredAt: string;
+export interface SignInCalendarDay {
+  date: string;
+  streak: number;
+  reward: number;
 }
 
-export interface PointLogPage {
-  totalPages: number;
-  page: number;
-  data: PointLogItem[];
+export interface SignInCalendar {
+  year: number;
+  month: number;
+  days: SignInCalendarDay[];
 }
 
 export type CommunityBoardKey = string;
@@ -689,6 +740,7 @@ export interface CommunityFeedItem {
   subCategoryLabel: string | null;
   title: string;
   excerpt: string;
+  authorId: number;
   authorName: string;
   authorIsDeleted: boolean;
   authorAvatar: string;
@@ -729,6 +781,7 @@ export interface CommunityReplyTarget {
 
 export interface CommunityThreadReply {
   id: number;
+  authorId: number;
   authorName: string;
   authorIsDeleted: boolean;
   authorBadge: string | null;
@@ -737,6 +790,7 @@ export interface CommunityThreadReply {
   content: string;
   likes: number;
   liked: boolean;
+  canDelete: boolean;
   replyTo: CommunityReplyTarget | null;
   childReplies: CommunityThreadReply[];
   childPage: CommunityPagination;
@@ -745,8 +799,9 @@ export interface CommunityThreadReply {
 export interface CommunityThreadDetail extends CommunityFeedItem {
   liked: boolean;
   favorited: boolean;
+  editedAt: string | null;
   canEdit: boolean;
-  bodyHtml: string;
+  content: string;
   repliesPage: CommunityPagination;
   replyItems: CommunityThreadReply[];
   relatedThreads: CommunityFeedItem[];
@@ -767,6 +822,11 @@ export interface UpdateCommunityThreadRequest extends CreateCommunityThreadReque
 
 export interface CommunityThreadMutationResult {
   id: number;
+}
+
+export interface CommunityThreadLockResult {
+  id: number;
+  locked: boolean;
 }
 
 export interface CommunityReplyDeletionResult {
@@ -803,6 +863,7 @@ export interface GetCommunityThreadRequest {
   replyPage?: number;
   replySize?: number;
   trackView?: boolean;
+  focusReplyId?: number;
 }
 
 export interface CreateCommunityThreadRequest {
@@ -823,6 +884,7 @@ export interface GetCommunityReplyChildrenRequest {
   parentReplyId: number;
   page?: number;
   size?: number;
+  afterReplyId?: number;
 }
 
 export interface CommunityReplyChildrenPayload {
@@ -858,46 +920,37 @@ export interface CommunityFavoriteToggleResult {
   favorites: number;
 }
 
-export type AppNotificationType =
-  | 'Comment'
-  | 'CommentReply'
-  | 'CommunityThreadReply'
-  | 'CommunityThreadChildReply'
-  | 'Unknown';
-
-export type AppNotificationObjectType =
-  | 'Book'
-  | 'Announcement'
-  | 'CommunityThread'
-  | 'Series'
-  | 'Unknown';
-
 export interface AppNotificationActor {
   id: number;
   userName: string;
   avatar: string;
 }
 
-export interface AppNotificationExtra {
-  objectId: number;
-  objectTitle: string;
-  seriesTitle: string | null;
-  preview: string;
-  replyId: number | null;
-  parentReplyId: number | null;
-  replyToReplyId: number | null;
-  replyPreview: string | null;
+export type AppNotificationTone =
+  | 'neutral'
+  | 'info'
+  | 'success'
+  | 'warning'
+  | 'danger';
+
+export interface AppNotificationAction {
+  type: string;
+  data: Record<string, unknown>;
 }
 
 export interface AppNotificationItem {
   id: number;
   actor: AppNotificationActor | null;
-  type: AppNotificationType;
-  objectType: AppNotificationObjectType;
-  objectId: number;
+  kind: string;
+  schemaVersion: number;
+  title: string;
+  body: string;
+  tone: AppNotificationTone;
+  action: AppNotificationAction | null;
+  data: Record<string, unknown>;
   isRead: boolean;
-  createdAt: string | null;
-  extra: AppNotificationExtra;
+  readAt: string | null;
+  createdAt: string;
 }
 
 export interface AppNotificationPage {
@@ -1159,28 +1212,13 @@ export class ApiClient {
     );
   }
 
-  getComicInfo(id: number): Promise<ComicInfo> {
-    return this.invoke('GetComicInfo', { Id: id }, decodeComicInfo);
-  }
-
-  getComicSeriesInfo(
-    seriesTitle: string,
-    order: ComicOrder = 'latest',
-  ): Promise<ComicSeriesDetail> {
-    return this.invoke(
-      'GetComicSeriesInfo',
-      { SeriesTitle: seriesTitle, Order: order },
-      decodeComicSeriesDetail,
-    );
-  }
-
   getComicContent(request: ComicContentRequest): Promise<ComicContent> {
     return this.invoke(
       'GetComicContent',
       {
         Cid: request.chapterId,
         Skip: request.skip ?? 0,
-        Take: request.take ?? 12,
+        Take: request.take ?? COMIC_CONTENT_BATCH_SIZE,
       },
       decodeComicContent,
     );
@@ -1206,9 +1244,6 @@ export class ApiClient {
         Id: request.id,
         Page: request.page,
         Size: COMMENTS_PAGE_SIZE,
-        ...(request.seriesTitle === undefined
-          ? {}
-          : { SeriesTitle: request.seriesTitle }),
       },
       decodeCommentPage,
     );
@@ -1262,24 +1297,12 @@ export class ApiClient {
         ReplyPage: replyPage,
         ReplySize: Math.max(1, request.replySize ?? 5),
         TrackView: request.trackView ?? replyPage === 1,
+        ...(request.focusReplyId === undefined
+          ? {}
+          : { FocusReplyId: Math.max(0, request.focusReplyId) }),
       },
       decodeCommunityThread,
       options,
-    );
-  }
-
-  createCommunityThread(
-    request: CreateCommunityThreadRequest,
-  ): Promise<CommunityThreadDetail> {
-    return this.invoke(
-      'CreateCommunityThread',
-      {
-        BoardKey: request.boardKey,
-        SubCategoryKey: request.subCategoryKey ?? '',
-        Title: request.title,
-        ContentHtml: request.contentHtml,
-      },
-      decodeCommunityThreadRequired,
     );
   }
 
@@ -1318,11 +1341,37 @@ export class ApiClient {
     );
   }
 
+  setCommunityThreadLocked(
+    threadId: number,
+    locked: boolean,
+  ): Promise<CommunityThreadLockResult> {
+    return this.invoke(
+      'SetCommunityThreadLocked',
+      { ThreadId: threadId, Locked: locked },
+      decodeCommunityThreadLockResult,
+    );
+  }
+
   deleteCommunityReply(replyId: number): Promise<CommunityReplyDeletionResult> {
     return this.invoke(
       'DeleteCommunityReply',
       { ReplyId: replyId },
       decodeCommunityReplyDeletionResult,
+    );
+  }
+
+  createCommunityThread(
+    request: CreateCommunityThreadRequest,
+  ): Promise<CommunityThreadDetail> {
+    return this.invoke(
+      'CreateCommunityThread',
+      {
+        BoardKey: request.boardKey,
+        SubCategoryKey: request.subCategoryKey ?? '',
+        Title: request.title,
+        ContentHtml: request.contentHtml,
+      },
+      decodeCommunityThreadRequired,
     );
   }
 
@@ -1377,6 +1426,9 @@ export class ApiClient {
         ParentReplyId: request.parentReplyId,
         Page: Math.max(1, request.page ?? 1),
         Size: Math.max(1, request.size ?? 3),
+        ...(request.afterReplyId === undefined
+          ? {}
+          : { AfterReplyId: Math.max(0, request.afterReplyId) }),
       },
       decodeCommunityReplyChildren,
       options,
@@ -1510,28 +1562,39 @@ export class ApiClient {
     return this.invoke('GetMyInfo', {}, decodeUserProfile);
   }
 
-  setAvatar(url: string): Promise<void> {
-    return this.invoke('SetAvatar', { Url: url }, () => undefined);
+  async getPublicUserSummary(userId: number): Promise<PublicUserSummary> {
+    if (!Number.isSafeInteger(userId) || userId <= 0) {
+      throw new TypeError('A valid user id is required.');
+    }
+    const response = await this.request<unknown>({
+      headers: { Accept: 'application/json' },
+      method: 'GET',
+      path: SERVICE_ENDPOINTS.publicUserSummaryPath,
+      query: { id: String(userId) },
+    });
+    if (response.status < 200 || response.status >= 300) {
+      throw new ApiError(
+        'Unable to load the public user profile.',
+        response.status === 401 ? 'auth' : 'server',
+        { status: response.status },
+      );
+    }
+    return decodePublicUserSummary(decodeSuccessfulResponse(
+      response.body,
+      'Unable to load the public user profile.',
+    ));
   }
 
-  checkIn(): Promise<DailyCheckInResult> {
-    return this.invoke('SignIn', {}, decodeDailyCheckInResult);
+  resetInviteCode(): Promise<ResetInviteCodeResult> {
+    return this.invoke('ResetInviteCode', {}, decodeResetInviteCodeResult);
   }
 
-  getSignInCalendar(year: number, month: number): Promise<SignInCalendar> {
-    return this.invoke('GetSignInCalendar', { Year: year, Month: month }, decodeSignInCalendar);
+  getShop(): Promise<ShopData> {
+    return this.invoke('GetShop', {}, decodeShopData);
   }
 
-  getMyItems(): Promise<ShopMyItems> {
-    return this.invoke('GetMyItems', {}, decodeShopMyItems);
-  }
-
-  useSignMakeupCard(date: string): Promise<SignMakeupCardResult> {
-    return this.invoke('UseSignMakeupCard', { Date: date }, decodeSignMakeupCardResult);
-  }
-
-  useComicQuotaCard(): Promise<UseComicQuotaCardResult> {
-    return this.invoke('UseComicQuotaCard', {}, decodeUseComicQuotaCardResult);
+  getMyShopItems(): Promise<OwnedShopItemsData> {
+    return this.invoke('GetMyItems', {}, decodeOwnedShopItemsData);
   }
 
   getPointLog(page: number, size: number): Promise<PointLogPage> {
@@ -1542,12 +1605,40 @@ export class ApiClient {
     return this.invoke('GetCoinLog', { Page: page, Size: size }, decodePointLogPage);
   }
 
-  getShop(): Promise<ShopInfo> {
-    return this.invoke('GetShop', {}, decodeShopInfo);
+  buyShopItem(request: BuyShopItemRequest): Promise<BuyShopItemResult> {
+    return this.invoke(
+      'BuyShopItem',
+      { Key: request.key, Quantity: request.quantity },
+      decodeBuyShopItemResult,
+    );
   }
 
-  buyShopItem(key: string, quantity: number): Promise<BuyShopItemResult> {
-    return this.invoke('BuyShopItem', { Key: key, Quantity: quantity }, decodeBuyShopItemResult);
+  useSignMakeupCard(request: UseSignMakeupCardRequest): Promise<UseSignMakeupCardResult> {
+    return this.invoke(
+      'UseSignMakeupCard',
+      { Date: request.date },
+      decodeUseSignMakeupCardResult,
+    );
+  }
+
+  useComicQuotaCard(): Promise<UseComicQuotaCardResult> {
+    return this.invoke('UseComicQuotaCard', {}, decodeUseComicQuotaCardResult);
+  }
+
+  getSignInCalendar(year: number, month: number): Promise<SignInCalendar> {
+    return this.invoke(
+      'GetSignInCalendar',
+      { Year: year, Month: month },
+      decodeSignInCalendar,
+    );
+  }
+
+  setAvatar(url: string): Promise<void> {
+    return this.invoke('SetAvatar', { Url: url }, () => undefined);
+  }
+
+  checkIn(): Promise<DailyCheckInResult> {
+    return this.invoke('SignIn', {}, decodeDailyCheckInResult);
   }
 
   async resetPassword(request: ResetPasswordRequest): Promise<void> {
@@ -1740,16 +1831,47 @@ export function decodeUserProfile(value: unknown): UserProfile {
     groupName: asStringOrEmpty(role.Name),
     unreadNotificationCount: asNumber(record.UnreadNotificationCount, 0),
     registeredAt: asNullableDateString(record.RegisterAt),
-    growth: {
-      experience: asNumber(growth.Exp, 0),
-      coin: asNumber(growth.Coin, 0),
-      level: asNumber(growth.Level, 0),
-      growthLevel: asNumber(growth.GrowthLevel, 0),
-      currentLevelExperience: asNumber(growth.CurrentLevelExp, 0),
-      nextLevelExperience: asNullableNumber(growth.NextLevelExp),
-      signInStreak: asNumber(growth.SignStreak, 0),
-      signedToday: asBoolean(growth.TodaySigned, false),
-    },
+    growth: decodeUserGrowthRecord(growth, false),
+  };
+}
+
+export function decodeUserGrowth(value: unknown): UserGrowth {
+  return decodeUserGrowthRecord(asRecord(value, 'growth'), true);
+}
+
+function decodeUserGrowthRecord(
+  growth: Record<string, unknown>,
+  strict: boolean,
+): UserGrowth {
+  const number = (value: unknown, fallback: number): number =>
+    strict ? asNumber(value) : asNumber(value, fallback);
+  return {
+    experience: number(growth.Exp, 0),
+    coin: number(growth.Coin, 0),
+    comicQuota: asNumber(growth.ComicQuota),
+    comicQuotaToday: asNumber(growth.ComicQuotaToday),
+    level: number(growth.Level, 0),
+    growthLevel: number(growth.GrowthLevel, 0),
+    currentLevelExperience: number(growth.CurrentLevelExp, 0),
+    nextLevelExperience: asNullableNumber(growth.NextLevelExp),
+    signInStreak: number(growth.SignStreak, 0),
+    signedToday: strict ? asBoolean(growth.TodaySigned) : asBoolean(growth.TodaySigned, false),
+  };
+}
+
+export function decodePublicUserSummary(value: unknown): PublicUserSummary {
+  const summary = asRecord(value, 'public user summary');
+  return {
+    id: asPositiveInteger(summary.Id),
+    userName: asString(summary.UserName),
+    avatarUrl: asPresentString(summary.Avatar),
+    role: asString(summary.Role),
+    level: asNonNegativeInteger(summary.Level),
+    registeredAt: asValidDateString(summary.RegisterAt),
+    bookCount: asNonNegativeInteger(summary.BookCount),
+    communityThreadCount: asNonNegativeInteger(summary.CommunityThreadCount),
+    communityReplyCount: asNonNegativeInteger(summary.CommunityReplyCount),
+    commentCount: asNonNegativeInteger(summary.CommentCount),
   };
 }
 
@@ -1763,47 +1885,90 @@ export function decodeDailyCheckInResult(value: unknown): DailyCheckInResult {
   };
 }
 
+export function decodeResetInviteCodeResult(value: unknown): ResetInviteCodeResult {
+  const record = asRecord(value, 'reset invite code response');
+  return { inviteCode: asString(record.InviteCode) };
+}
+
+export function decodePointLogPage(value: unknown): PointLogPage {
+  const record = asRecord(value, 'point log response');
+  return {
+    page: asNumber(record.Page),
+    totalPages: asNumber(record.TotalPages),
+    items: asArray(record.Data, 'point log items').map((item) => {
+      const entry = asRecord(item, 'point log item');
+      return {
+        source: asString(entry.Source),
+        sourceLabel: asString(entry.SourceLabel),
+        amount: asNumber(entry.Amount),
+        balance: asNumber(entry.Balance),
+        refId: asNullableNumber(entry.RefId),
+        occurredAt: asDateString(entry.OccurredAt),
+      };
+    }),
+  };
+}
+
+export function decodeShopData(value: unknown): ShopData {
+  const record = asRecord(value, 'shop response');
+  return {
+    coin: asNumber(record.Coin),
+    items: asArray(record.Items, 'shop items').map(decodeShopItem),
+  };
+}
+
+export function decodeOwnedShopItemsData(value: unknown): OwnedShopItemsData {
+  const record = asRecord(value, 'owned shop items response');
+  return {
+    items: asArray(record.Items, 'owned shop items').map(decodeOwnedShopItem),
+  };
+}
+
+export function decodeBuyShopItemResult(value: unknown): BuyShopItemResult {
+  const record = asRecord(value, 'buy shop item response');
+  return {
+    key: asString(record.Key),
+    owned: asNumber(record.Owned),
+    coin: asNumber(record.Coin),
+    cost: asNumber(record.Cost),
+    monthlyPurchased: asNumber(record.MonthlyPurchased),
+  };
+}
+
+export function decodeUseSignMakeupCardResult(value: unknown): UseSignMakeupCardResult {
+  const record = asRecord(value, 'use sign makeup card response');
+  return {
+    date: asString(record.Date),
+    streak: asNumber(record.Streak),
+    reward: asNumber(record.Reward),
+    coinReward: asNumber(record.CoinReward),
+    owned: asNumber(record.Owned),
+  };
+}
+
+export function decodeUseComicQuotaCardResult(value: unknown): UseComicQuotaCardResult {
+  const record = asRecord(value, 'use comic quota card response');
+  return {
+    key: asString(record.Key),
+    granted: asNumber(record.Granted),
+    quota: asNumber(record.Quota),
+    owned: asNumber(record.Owned),
+  };
+}
+
 export function decodeSignInCalendar(value: unknown): SignInCalendar {
   const record = asRecord(value, 'sign-in calendar response');
   return {
     year: asNumber(record.Year),
     month: asNumber(record.Month),
-    days: Array.isArray(record.Days) ? record.Days.map(decodeSignInCalendarDay) : [],
-  };
-}
-
-function decodeSignInCalendarDay(value: unknown): SignInCalendarDay {
-  const record = asRecord(value, 'sign-in calendar day');
-  return {
-    signDate: asString(record.SignDate),
-    streak: asNumber(record.Streak, 0),
-    reward: asNumber(record.Reward, 0),
-  };
-}
-
-export function decodeShopMyItems(value: unknown): ShopMyItems {
-  const record = asRecord(value, 'shop items response');
-  return {
-    items: Array.isArray(record.Items) ? record.Items.map(decodeOwnedItem) : [],
-  };
-}
-
-function decodeOwnedItem(value: unknown): ShopOwnedItem {
-  const record = asRecord(value, 'owned item');
-  return {
-    key: asStringOrEmpty(record.Key),
-    name: asStringOrEmpty(record.Name),
-    description: asStringOrEmpty(record.Description),
-    image: asStringOrEmpty(record.Image),
-    quantity: asNumber(record.Quantity, 0),
-  };
-}
-
-export function decodeShopInfo(value: unknown): ShopInfo {
-  const record = asRecord(value, 'shop response');
-  return {
-    coin: asNumber(record.Coin, 0),
-    items: Array.isArray(record.Items) ? record.Items.map(decodeShopItem) : [],
+    days: asArray(record.Days, 'sign-in calendar days').map((day) => {
+      const entry = asRecord(day, 'sign-in calendar day');
+      return {
+        date: asString(entry.SignDate),
+        streak: asNumber(entry.Streak),
+        reward: asNumber(entry.Reward),
+      };
+    }),
   };
 }
 
@@ -1811,62 +1976,24 @@ function decodeShopItem(value: unknown): ShopItem {
   const record = asRecord(value, 'shop item');
   return {
     key: asString(record.Key),
-    name: asStringOrEmpty(record.Name),
-    description: asStringOrEmpty(record.Description),
-    image: asStringOrEmpty(record.Image),
-    price: asNumber(record.Price, 0),
-    owned: asNumber(record.Owned, 0),
+    name: asString(record.Name),
+    description: asPresentString(record.Description),
+    image: asPresentString(record.Image),
+    price: asNumber(record.Price),
+    owned: asNumber(record.Owned),
     monthlyLimit: asNullableNumber(record.MonthlyLimit),
-    monthlyPurchased: asNumber(record.MonthlyPurchased, 0),
+    monthlyPurchased: asNumber(record.MonthlyPurchased),
   };
 }
 
-export function decodeBuyShopItemResult(value: unknown): BuyShopItemResult {
-  const record = asRecord(value, 'buy shop item response');
+function decodeOwnedShopItem(value: unknown): OwnedShopItem {
+  const record = asRecord(value, 'owned shop item');
   return {
-    key: asStringOrEmpty(record.Key),
-    owned: asNumber(record.Owned, 0),
-    coin: asNumber(record.Coin, 0),
-    cost: asNumber(record.Cost, 0),
-    monthlyPurchased: asNumber(record.MonthlyPurchased, 0),
-  };
-}
-
-export function decodeSignMakeupCardResult(value: unknown): SignMakeupCardResult {
-  const record = asRecord(value, 'sign makeup card response');
-  return {
-    owned: asNumber(record.Owned, 0),
-    streak: asNumber(record.Streak, 0),
-  };
-}
-
-export function decodeUseComicQuotaCardResult(value: unknown): UseComicQuotaCardResult {
-  const record = asRecord(value, 'comic quota card response');
-  return {
-    key: asStringOrEmpty(record.Key),
-    granted: asNumber(record.Granted, 0),
-    quota: asNumber(record.Quota, 0),
-    owned: asNumber(record.Owned, 0),
-  };
-}
-
-export function decodePointLogPage(value: unknown): PointLogPage {
-  const record = asRecord(value, 'point log response');
-  return {
-    totalPages: asNumber(record.TotalPages, 1),
-    page: asNumber(record.Page, 1),
-    data: Array.isArray(record.Data) ? record.Data.map(decodePointLogItem) : [],
-  };
-}
-
-function decodePointLogItem(value: unknown): PointLogItem {
-  const record = asRecord(value, 'point log item');
-  return {
-    source: asStringOrEmpty(record.Source),
-    amount: asNumber(record.Amount, 0),
-    balance: asNumber(record.Balance, 0),
-    refId: asNullableNumber(record.RefId),
-    occurredAt: asStringOrEmpty(record.OccurredAt),
+    key: asString(record.Key),
+    name: asString(record.Name),
+    description: asPresentString(record.Description),
+    image: asPresentString(record.Image),
+    quantity: asNumber(record.Quantity),
   };
 }
 
@@ -2001,38 +2128,6 @@ export function decodeCommunityFeed(value: unknown): CommunityFeedPayload {
   };
 }
 
-export function decodeCommunityThread(
-  value: unknown,
-): CommunityThreadDetail | null {
-  if (value === null || value === undefined) return null;
-  if (isRecord(value) && Object.keys(value).length === 0) return null;
-  return decodeCommunityThreadRequired(value);
-}
-
-export function decodeCommunityThreadRequired(
-  value: unknown,
-): CommunityThreadDetail {
-  const response = asRecord(value, 'community thread response');
-  return {
-    ...decodeCommunityFeedItem(response),
-    liked: asBoolean(response.Liked, false),
-    favorited: asBoolean(response.Favorited, false),
-    canEdit: asBoolean(response.CanEdit, false),
-    bodyHtml: asStringOrEmpty(response.BodyHtml),
-    repliesPage: decodeCommunityPagination(response.RepliesPage),
-    replyItems: decodeOptionalArray(
-      response.ReplyItems,
-      'community replies',
-      decodeCommunityThreadReply,
-    ),
-    relatedThreads: decodeOptionalArray(
-      response.RelatedThreads,
-      'related community threads',
-      decodeCommunityFeedItem,
-    ),
-  };
-}
-
 export function decodeCommunityThreadEditInfo(
   value: unknown,
 ): CommunityThreadEditInfo {
@@ -2054,6 +2149,13 @@ export function decodeCommunityThreadMutationResult(
   return { id: asNumber(response.Id) };
 }
 
+export function decodeCommunityThreadLockResult(
+  value: unknown,
+): CommunityThreadLockResult {
+  const response = asRecord(value, 'community thread lock response');
+  return { id: asNumber(response.Id), locked: asBoolean(response.Locked, false) };
+}
+
 export function decodeCommunityReplyDeletionResult(
   value: unknown,
 ): CommunityReplyDeletionResult {
@@ -2061,6 +2163,39 @@ export function decodeCommunityReplyDeletionResult(
   return {
     id: asNumber(response.Id),
     removed: asNumber(response.Removed),
+  };
+}
+
+export function decodeCommunityThread(
+  value: unknown,
+): CommunityThreadDetail | null {
+  if (value === null || value === undefined) return null;
+  if (isRecord(value) && Object.keys(value).length === 0) return null;
+  return decodeCommunityThreadRequired(value);
+}
+
+export function decodeCommunityThreadRequired(
+  value: unknown,
+): CommunityThreadDetail {
+  const response = asRecord(value, 'community thread response');
+  return {
+    ...decodeCommunityFeedItem(response),
+    liked: asBoolean(response.Liked, false),
+    favorited: asBoolean(response.Favorited, false),
+    editedAt: asNullableDateString(response.EditedAt),
+    canEdit: asBoolean(response.CanEdit, false),
+    content: asStringOrEmpty(response.Content),
+    repliesPage: decodeCommunityPagination(response.RepliesPage),
+    replyItems: decodeOptionalArray(
+      response.ReplyItems,
+      'community replies',
+      decodeCommunityThreadReply,
+    ),
+    relatedThreads: decodeOptionalArray(
+      response.RelatedThreads,
+      'related community threads',
+      decodeCommunityFeedItem,
+    ),
   };
 }
 
@@ -2192,6 +2327,7 @@ function decodeCommunityFeedItem(value: unknown): CommunityFeedItem {
     subCategoryLabel: asNullableString(item.SubCategoryLabel),
     title: asString(item.Title),
     excerpt: asStringOrEmpty(item.Excerpt),
+    authorId: asPositiveInteger(item.AuthorId),
     authorName: asStringOrEmpty(item.AuthorName),
     authorIsDeleted: asBoolean(item.AuthorIsDeleted, false),
     authorAvatar: asStringOrEmpty(item.AuthorAvatar),
@@ -2237,6 +2373,7 @@ function decodeCommunityThreadReply(value: unknown): CommunityThreadReply {
   const reply = asRecord(value, 'community reply');
   return {
     id: asNumber(reply.Id),
+    authorId: asPositiveInteger(reply.AuthorId),
     authorName: asStringOrEmpty(reply.AuthorName),
     authorIsDeleted: asBoolean(reply.AuthorIsDeleted, false),
     authorBadge: asNullableString(reply.AuthorBadge),
@@ -2245,6 +2382,7 @@ function decodeCommunityThreadReply(value: unknown): CommunityThreadReply {
     content: asStringOrEmpty(reply.Content),
     likes: Math.max(0, asNumber(reply.Likes, 0)),
     liked: asBoolean(reply.Liked, false),
+    canDelete: asBoolean(reply.CanDelete, false),
     replyTo: isRecord(reply.ReplyTo)
       ? {
           id: asNumber(reply.ReplyTo.Id),
@@ -2295,58 +2433,55 @@ function decodeCommunityFavoriteToggle(
 
 function decodeAppNotificationItem(value: unknown): AppNotificationItem {
   const item = asRecord(value, 'notification');
-  const actor = isRecord(item.Actor) ? item.Actor : null;
-  const extra = isRecord(item.Extra) ? item.Extra : {};
+  const actor = item.Actor === null || item.Actor === undefined
+    ? null
+    : decodeAppNotificationActor(item.Actor);
+  const action = item.Action === null || item.Action === undefined
+    ? null
+    : decodeAppNotificationAction(item.Action);
   return {
-    id: asNumber(item.Id),
-    actor: actor === null
-      ? null
-      : {
-          id: asNumber(actor.Id),
-          userName: asStringOrEmpty(actor.UserName),
-          avatar: asStringOrEmpty(actor.Avatar),
-        },
-    type: decodeAppNotificationType(item.Type),
-    objectType: decodeAppNotificationObjectType(item.ObjectType),
-    objectId: asNumber(item.ObjectId, 0),
-    isRead: asBoolean(item.IsRead, false),
-    createdAt: asNullableDateString(item.CreatedAt),
-    extra: {
-      objectId: asNumber(extra.object_id, 0),
-      objectTitle: asStringOrEmpty(extra.object_title),
-      seriesTitle: asNullableString(extra.series_title),
-      preview: asStringOrEmpty(extra.preview),
-      replyId: asNullableNumber(extra.reply_id),
-      parentReplyId: asNullableNumber(extra.parent_reply_id),
-      replyToReplyId: asNullableNumber(extra.reply_to_reply_id),
-      replyPreview: asNullableString(extra.reply_preview),
-    },
+    id: asPositiveInteger(item.Id),
+    actor,
+    kind: asString(item.Kind),
+    schemaVersion: asNonNegativeInteger(item.SchemaVersion),
+    title: asString(item.Title),
+    body: asPresentString(item.Body),
+    tone: decodeAppNotificationTone(item.Tone),
+    action,
+    data: asRecord(item.Data, 'notification data'),
+    isRead: asBoolean(item.IsRead),
+    readAt: asNullableDateString(item.ReadAt),
+    createdAt: asValidDateString(item.CreatedAt),
   };
 }
 
-function decodeAppNotificationType(value: unknown): AppNotificationType {
-  switch (value) {
-    case 'Comment':
-    case 'CommentReply':
-    case 'CommunityThreadReply':
-    case 'CommunityThreadChildReply':
-      return value;
-    default:
-      return 'Unknown';
-  }
+function decodeAppNotificationActor(value: unknown): AppNotificationActor {
+  const actor = asRecord(value, 'notification actor');
+  return {
+    id: asPositiveInteger(actor.Id),
+    userName: asString(actor.UserName),
+    avatar: asPresentString(actor.Avatar),
+  };
 }
 
-function decodeAppNotificationObjectType(
-  value: unknown,
-): AppNotificationObjectType {
+function decodeAppNotificationAction(value: unknown): AppNotificationAction {
+  const action = asRecord(value, 'notification action');
+  return {
+    type: asString(action.Type),
+    data: asRecord(action.Data, 'notification action data'),
+  };
+}
+
+function decodeAppNotificationTone(value: unknown): AppNotificationTone {
   switch (value) {
-    case 'Book':
-    case 'Announcement':
-    case 'CommunityThread':
-    case 'Series':
+    case 'neutral':
+    case 'info':
+    case 'success':
+    case 'warning':
+    case 'danger':
       return value;
     default:
-      return 'Unknown';
+      return 'neutral';
   }
 }
 
@@ -2376,6 +2511,8 @@ export function decodeBookDetail(value: unknown): BookDetail {
     coverUrl: normalizeCoverUrl(rawCoverUrl),
     coverPlaceholder: extractBlurHashPlaceholder(rawCoverUrl),
     title: asString(book.Title),
+    seriesTitle: asNullableString(response.SeriesTitle),
+    series: decodeBookSeries(response.Series),
     authorName: asNullableString(book.Author),
     category,
     introduction: asStringOrEmpty(book.Introduction),
@@ -2385,7 +2522,9 @@ export function decodeBookDetail(value: unknown): BookDetail {
     favoriteCount: asNumber(book.Favorite, 0),
     viewCount: asNumber(book.Views, 0),
     canEdit: book.CanEdit === true,
-    chapters: decodeBookChapters(book.Chapter),
+    canDownload: book.CanDownload === true,
+    downloadCost: Math.max(0, asNumber(book.DownloadCost, 0)),
+    chapters: decodeBookChapters(book.Chapters ?? book.Chapter),
     user: decodeBookDetailUser(book.User),
     classification,
     readPosition: decodeBookReadPosition(response.ReadPosition),
@@ -2481,10 +2620,11 @@ export function decodeCommentPage(value: unknown): CommentPage {
   const response = asRecord(value, 'comments response');
   const users = asRecord(response.Users, 'comment users');
   const commentaries = asRecord(response.Commentaries, 'commentaries');
-  const roots = asArray(response.Data, 'comment roots');
 
-  function getUser(userId: number): CommentUser {
-    const user = asRecord(users[String(userId)], 'comment user');
+  function getUser(userId: number): CommentUser | null {
+    const rawUser = users[String(userId)];
+    if (rawUser === null || rawUser === undefined) return null;
+    const user = asRecord(rawUser, 'comment user');
     return {
       id: asNumber(user.Id, userId),
       userName: asString(user.UserName),
@@ -2492,39 +2632,53 @@ export function decodeCommentPage(value: unknown): CommentPage {
     };
   }
 
-  function getCommentary(commentId: number): Record<string, unknown> {
-    return asRecord(commentaries[String(commentId)], 'commentary');
+  function getCommentary(commentId: number): Record<string, unknown> | null {
+    const rawCommentary = commentaries[String(commentId)];
+    if (rawCommentary === null || rawCommentary === undefined) return null;
+    return asRecord(rawCommentary, 'commentary');
   }
 
+  const roots = asArray(response.Data, 'comment roots');
   return {
     page: asNumber(response.Page, 1),
     totalPages: asNumber(response.TotalPages, 0),
-    items: roots.map((rootValue) => {
+    items: roots.flatMap((rootValue) => {
       const root = asRecord(rootValue, 'comment root');
       const id = asNumber(root.Id);
       const commentary = getCommentary(id);
-      const replies = Array.isArray(root.Reply) ? root.Reply.map((value) => asNumber(value)) : [];
-      return {
+      if (commentary === null) return [];
+      const user = getUser(asNumber(commentary.UserId));
+      // Deleted or concurrently removed records can remain in Data while the
+      // denormalized maps have already dropped their commentary/user entry.
+      if (user === null) return [];
+      const replies = Array.isArray(root.Reply) ? root.Reply : [];
+      return [{
         id,
-        user: getUser(asNumber(commentary.UserId)),
+        user,
         content: asStringOrEmpty(commentary.Content),
         createdAt: asDateString(commentary.CreatedAt),
         canEdit: commentary.CanEdit === true,
-        replies: replies.map((replyId) => {
+        replies: replies.flatMap((value) => {
+          const replyId = asNumber(value);
           const reply = getCommentary(replyId);
+          if (reply === null) return [];
+          const replyUser = getUser(asNumber(reply.UserId));
+          if (replyUser === null) return [];
           const replyToId = asNullableNumber(reply.ReplyId);
           const replyTo = replyToId === null ? null : getCommentary(replyToId);
-          return {
+          return [{
             id: replyId,
-            user: getUser(asNumber(reply.UserId)),
+            user: replyUser,
             content: asStringOrEmpty(reply.Content),
             createdAt: asDateString(reply.CreatedAt),
             canEdit: reply.CanEdit === true,
+            // The reply target may belong to another page or have been
+            // removed. The reply itself remains renderable without that label.
             replyToUser:
               replyTo === null ? null : getUser(asNumber(replyTo.UserId)),
-          };
+          }];
         }),
-      };
+      }];
     }),
   };
 }
@@ -2534,9 +2688,6 @@ function encodeCommentRequest(request: PostCommentRequest): JsonValue {
     Type: request.type,
     Id: request.id,
     Content: request.content,
-    ...(request.seriesTitle === undefined
-      ? {}
-      : { SeriesTitle: request.seriesTitle }),
     ...(request.parentId === undefined ? {} : { ParentId: request.parentId }),
     ...(request.replyId === undefined ? {} : { ReplyId: request.replyId }),
   };
@@ -2601,6 +2752,7 @@ function decodeComicSeriesListItem(value: unknown): ComicSeriesListItem {
   const rawCoverUrl = asString(comic.Cover);
   const coverUrl = normalizeCoverUrl(rawCoverUrl);
   return {
+    bookId: asNumber(comic.Id),
     id: asNumber(comic.Id),
     title: asString(comic.Title),
     originalTitle: asNullableString(comic.OriginalTitle),
@@ -2700,9 +2852,29 @@ function decodeBookClassification(value: unknown): BookClassification {
 
 function decodeBookChapters(value: unknown): BookChapter[] {
   if (!Array.isArray(value)) return [];
-  return value.map((item) => {
+  return value.map((item, index) => {
     const chapter = asRecord(item, 'book chapter');
-    return { id: asNumber(chapter.Id), title: asString(chapter.Title) };
+    return {
+      id: asNumber(chapter.Id),
+      title: asString(chapter.Title),
+      sortNum: Math.max(1, asNumber(chapter.SortNum, index + 1)),
+      pageCount: Math.max(0, asNumber(chapter.PageCount, 0)),
+      downloadCost: Math.max(0, asNumber(chapter.DownloadCost, 0)),
+    };
+  });
+}
+
+function decodeBookSeries(value: unknown): BookSeriesItem[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    const series = asRecord(item, 'book series item');
+    const rawCoverUrl = asString(series.Cover);
+    return {
+      id: asNumber(series.Id),
+      title: asString(series.Title),
+      coverUrl: normalizeCoverUrl(rawCoverUrl),
+      coverPlaceholder: extractBlurHashPlaceholder(rawCoverUrl),
+    };
   });
 }
 
@@ -2724,6 +2896,7 @@ function decodeComicSeriesVolume(value: unknown): ComicSeriesVolume {
     id: asNumber(volume.Id),
     title: asString(volume.Title),
     uploader: {
+      id: asPositiveInteger(uploader.Id),
       userName: asStringOrEmpty(uploader.UserName),
       avatarUrl: asStringOrEmpty(uploader.Avatar),
     },
@@ -2845,6 +3018,13 @@ function asStringOrEmpty(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
+function asPresentString(value: unknown): string {
+  if (typeof value !== 'string') {
+    throw new ApiError('The server returned an invalid text field.', 'server');
+  }
+  return value;
+}
+
 function asNullableString(value: unknown): string | null {
   if (value === null || value === undefined || value === '') return null;
   return asString(value);
@@ -2860,6 +3040,22 @@ function asNullableNumber(value: unknown): number | null {
   return value === null || value === undefined ? null : asNumber(value);
 }
 
+function asPositiveInteger(value: unknown): number {
+  const number = asNumber(value);
+  if (!Number.isSafeInteger(number) || number <= 0) {
+    throw new ApiError('The server returned an invalid identifier.', 'server');
+  }
+  return number;
+}
+
+function asNonNegativeInteger(value: unknown): number {
+  const number = asNumber(value);
+  if (!Number.isSafeInteger(number) || number < 0) {
+    throw new ApiError('The server returned an invalid count.', 'server');
+  }
+  return number;
+}
+
 function asBoolean(value: unknown, fallback?: boolean): boolean {
   if (typeof value === 'boolean') return value;
   if (fallback !== undefined) return fallback;
@@ -2869,6 +3065,14 @@ function asBoolean(value: unknown, fallback?: boolean): boolean {
 function asDateString(value: unknown): string {
   if (value instanceof Date) return value.toISOString();
   return asString(value);
+}
+
+function asValidDateString(value: unknown): string {
+  const date = asDateString(value);
+  if (Number.isNaN(Date.parse(date))) {
+    throw new ApiError('The server returned an invalid date field.', 'server');
+  }
+  return date;
 }
 
 function asNullableDateString(value: unknown): string | null {

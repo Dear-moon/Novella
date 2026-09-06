@@ -73,14 +73,14 @@ export function useBookDetail(
         ?? (stateRef.current.status === 'ready' && stateRef.current.book.id === bookId
           ? stateRef.current.seriesTitle
           : null);
-      const [serverBook, isInShelf, cachedPosition, seriesTitle] = await Promise.all([
-        (type === 'Comic' ? comicDetails : bookDetails).load(bookId),
-        shelf.contains(bookId),
-        getCachedReaderPosition(bookId),
-        type === 'Comic'
-          ? retainedSeriesTitle ?? comicDetails.resolveSeriesTitle(bookId).catch(() => null)
-          : Promise.resolve(null),
-      ]);
+    const [serverBook, isInShelf, cachedPosition] = await Promise.all([
+     (type === 'Comic' ? comicDetails : bookDetails).load(bookId),
+     shelf.contains(bookId),
+     getCachedReaderPosition(bookId),
+   ]);
+     const seriesTitle = type === 'Comic'
+       ? serverBook.seriesTitle ?? retainedSeriesTitle
+       : null;
       if (showSkeleton) await waitForMinimumDisplay(startedAt);
       const hasCachedChapter = cachedPosition
         ? serverBook.chapters.some((chapter) => chapter.id === cachedPosition.chapterId)

@@ -38,6 +38,23 @@ export default function SettingsStackLayout() {
         }}
       />
       <Stack.Screen
+        name="shop"
+        options={{
+          title: t('shop.title'),
+        }}
+      />
+      <Stack.Screen
+        name="point-logs"
+        options={{
+          headerShown: false,
+          presentation: 'formSheet',
+          sheetAllowedDetents: [0.5, 1],
+          sheetGrabberVisible: true,
+          sheetInitialDetentIndex: 0,
+          title: t('pointLogs.experienceTitle'),
+        }}
+      />
+      <Stack.Screen
         name="check-in-calendar"
         options={{
           ...badgeSheetOptions,
@@ -46,24 +63,7 @@ export default function SettingsStackLayout() {
           title: t('profile.checkIn.title'),
         }}
       />
-      <Stack.Screen
-        name="point-log"
-        options={{
-          ...badgeSheetOptions,
-          headerShown: false,
-          presentation: isAndroid ? 'transparentModal' : 'formSheet',
-          title: t('profile.pointLog.expTitle'),
-        }}
-      />
-      <Stack.Screen
-        name="shop"
-        options={{
-          ...badgeSheetOptions,
-          headerShown: false,
-          presentation: isAndroid ? 'transparentModal' : 'formSheet',
-          title: t('profile.shop.title'),
-        }}
-      />
+
       <Stack.Screen name="appearance" options={{ title: t('appearance.title') }} />
       <Stack.Screen name="cache" options={{ title: t('cache.title') }} />
       <Stack.Screen name="about" options={{ title: t('about.title') }} />

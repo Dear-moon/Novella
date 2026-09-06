@@ -142,13 +142,13 @@ export function ProfileScreen() {
             <StaticValueRow
               icon="experience"
               label={t('profile.fields.experience')}
-              onPress={() => router.push({ pathname: '/settings/point-log', params: { kind: 'exp' } })}
+              onPress={() => router.push({ pathname: '/settings/point-logs', params: { kind: 'experience' } })}
               value={new Intl.NumberFormat(locale).format(profile.growth.experience)}
             />
             <StaticValueRow
               icon="coins"
               label={t('profile.fields.coins')}
-              onPress={() => router.push({ pathname: '/settings/point-log', params: { kind: 'coin' } })}
+              onPress={() => router.push({ pathname: '/settings/point-logs', params: { kind: 'coin' } })}
               value={new Intl.NumberFormat(locale).format(profile.growth.coin)}
             />
             <NativeGroupedListRow

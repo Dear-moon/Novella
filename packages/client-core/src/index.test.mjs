@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   createAnnouncementsUseCase,
+  createAuthenticationUseCase,
   createBookSearchUseCase,
   createClientSessionController,
   createComicDetailUseCase,
@@ -11,8 +12,11 @@ import {
   createDiscoveryUseCase,
   createHistoryUseCase,
   createNotificationsUseCase,
+  createPointLogUseCase,
   createProfileUseCase,
+  createPublicProfileUseCase,
   createReaderUseCase,
+  createShopUseCase,
   createShelfDraft,
   createShelfFolder,
   createShelfUseCase,
@@ -22,6 +26,7 @@ import {
   getShelfSelectionBookCount,
   moveShelfBooks,
   parseAvatarSource,
+  PUBLIC_USER_SUMMARY_CACHE_MILLISECONDS,
   removeShelfItems,
   renameShelfFolder,
   reorderShelfSiblings,
@@ -53,6 +58,7 @@ class FakeSignalR {
   connectCalls = 0;
   closeCalls = 0;
   invokeCalls = 0;
+  subscriptions = new Map();
   connectImplementation = async () => undefined;
 
   async connect() {
@@ -64,11 +70,75 @@ class FakeSignalR {
     this.closeCalls += 1;
   }
 
+  subscribe(methodName, listener) {
+    const listeners = this.subscriptions.get(methodName) ?? new Set();
+    listeners.add(listener);
+    this.subscriptions.set(methodName, listeners);
+    return () => listeners.delete(listener);
+  }
+
+  emit(methodName, payload) {
+    for (const listener of this.subscriptions.get(methodName) ?? []) listener(payload);
+  }
+
   async invoke(methodName, args) {
     this.invokeCalls += 1;
     return { methodName, args };
   }
 }
+
+test('sign-in stays authenticated when stale SignalR cleanup fails', async () => {
+  const values = new Map();
+  const authentication = createAuthenticationUseCase(
+    {
+      async login() {
+        return { sessionToken: 'session-token', refreshToken: 'refresh-token' };
+      },
+    },
+    {
+      async sha256(value) { return `hash:${value}`; },
+    },
+    {
+      async get(key) { return values.get(key) ?? null; },
+      async set(key, value) { values.set(key, value); },
+      async delete(key) { values.delete(key); },
+    },
+    {
+      async close() { throw new Error('stale SignalR connection'); },
+    },
+  );
+
+  await authentication.signIn('reader@example.com', 'password');
+
+  assert.equal(authentication.getSnapshot().status, 'authenticated');
+  assert.equal(values.get('novella.refresh-token'), 'refresh-token');
+  assert.equal(values.get('novella.session-token'), 'session-token');
+});
+
+test('refresh stays authenticated when stale SignalR cleanup fails', async () => {
+  const values = new Map([['novella.refresh-token', 'refresh-token']]);
+  const authentication = createAuthenticationUseCase(
+    {
+      async refreshToken() { return 'new-session-token'; },
+    },
+    {
+      async sha256(value) { return `hash:${value}`; },
+    },
+    {
+      async get(key) { return values.get(key) ?? null; },
+      async set(key, value) { values.set(key, value); },
+      async delete(key) { values.delete(key); },
+    },
+    {
+      async close() { throw new Error('stale SignalR connection'); },
+    },
+  );
+
+  assert.equal(await authentication.refresh(), true);
+  assert.equal(authentication.getSnapshot().status, 'authenticated');
+  assert.equal(values.get('novella.refresh-token'), 'refresh-token');
+  assert.equal(values.get('novella.session-token'), 'new-session-token');
+});
 
 test('client startup bootstraps auth before one shared SignalR connection', async () => {
   const order = [];
@@ -94,6 +164,14 @@ test('client startup bootstraps auth before one shared SignalR connection', asyn
   assert.deepEqual(await first, { status: 'ready', error: null });
   assert.deepEqual(order, ['auth', 'connect']);
   assert.equal(signalR.connectCalls, 1);
+
+  const events = [];
+  const unsubscribe = session.transport.subscribe('OnMessage', (message) => events.push(message));
+  signalR.emit('OnMessage', 'hello');
+  assert.deepEqual(events, ['hello']);
+  unsubscribe();
+  signalR.emit('OnMessage', 'ignored');
+  assert.deepEqual(events, ['hello']);
 
   await session.close();
 });
@@ -188,6 +266,7 @@ test('background waits for registered reader persistence before closing SignalR'
     lifecycle,
     signalR,
     backgroundDrainTimeoutMilliseconds: 100,
+    backgroundDisconnectDelayMilliseconds: 0,
   });
   await session.start();
   session.registerBeforeBackground(() => persisted.promise);
@@ -197,6 +276,7 @@ test('background waits for registered reader persistence before closing SignalR'
   assert.equal(signalR.closeCalls, 0);
 
   persisted.resolve();
+  await nextTask();
   await nextTask();
   assert.equal(signalR.closeCalls, 1);
 
@@ -217,10 +297,12 @@ test('background closes the gate and foreground refreshes then reconnects before
     },
     lifecycle,
     signalR,
+    backgroundDisconnectDelayMilliseconds: 0,
   });
 
   await session.start();
   lifecycle.emit('background');
+  await nextTask();
   await nextTask();
   assert.equal(signalR.closeCalls, 1);
 
@@ -241,6 +323,48 @@ test('background closes the gate and foreground refreshes then reconnects before
   await invocation;
   assert.equal(signalR.connectCalls, 2);
   assert.equal(signalR.invokeCalls, 1);
+
+  await session.close();
+});
+
+test('short background keeps SignalR open until the grace period expires', async () => {
+  const lifecycle = new FakeLifecycle();
+  const signalR = new FakeSignalR();
+  const session = createClientSessionController({
+    async bootstrapAuthentication() {},
+    async refreshAuthentication() {},
+    lifecycle,
+    signalR,
+    backgroundDisconnectDelayMilliseconds: 25,
+  });
+
+  await session.start();
+  lifecycle.emit('background');
+  await nextTask();
+  assert.equal(signalR.closeCalls, 0);
+
+  lifecycle.emit('foreground');
+  await nextTask();
+  assert.equal(signalR.closeCalls, 0);
+
+  await session.close();
+});
+
+test('long background closes SignalR after the grace period', async () => {
+  const lifecycle = new FakeLifecycle();
+  const signalR = new FakeSignalR();
+  const session = createClientSessionController({
+    async bootstrapAuthentication() {},
+    async refreshAuthentication() {},
+    lifecycle,
+    signalR,
+    backgroundDisconnectDelayMilliseconds: 5,
+  });
+
+  await session.start();
+  lifecycle.emit('background');
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  assert.equal(signalR.closeCalls, 1);
 
   await session.close();
 });
@@ -278,28 +402,21 @@ test('reader preload marks chapter Hub work as cancellable preload priority', as
   ]]);
 });
 
-test('comic detail resolves the canonical series title from a volume id', async () => {
+test('comic detail loads the unified BookInfo contract by volume id', async () => {
   const requestedIds = [];
-  let items = [{ title: 'Canonical series' }];
+  const detail = { id: 42, type: 'Comic', title: 'Volume', seriesTitle: 'Canonical series' };
   const useCase = createComicDetailUseCase({
-    async getComicSeriesByIds(ids) {
-      requestedIds.push(ids);
-      return { page: 1, totalPages: 1, items };
+    async getBookInfo(id) {
+      requestedIds.push(id);
+      return { ...detail, id };
     },
   });
 
-  assert.equal(await useCase.resolveSeriesTitle(42), 'Canonical series');
-  assert.deepEqual(requestedIds, [[42]]);
-
-  items = [];
-  await assert.rejects(
-    () => useCase.resolveSeriesTitle(42),
-    /series title is unavailable/i,
-  );
-  await assert.rejects(() => useCase.resolveSeriesTitle(0), /valid book id/i);
+  assert.deepEqual(await useCase.load(42), detail);
+  assert.deepEqual(requestedIds, [42]);
 });
 
-test('comments use case accepts the official series target and preserves book validation', async () => {
+test('comments use case accepts comic Book targets and validates ids', async () => {
   const calls = [];
   const useCase = createCommentsUseCase({
     async getComments(request) {
@@ -313,27 +430,19 @@ test('comments use case accepts the official series target and preserves book va
       calls.push(['reply', request]);
     },
   });
-  const seriesTarget = { type: 'Series', id: 0, seriesTitle: 'Comic series' };
+  const bookTarget = { type: 'Book', id: 42 };
 
-  await useCase.load({ ...seriesTarget, page: 1 });
-  await useCase.post({ ...seriesTarget, content: 'Root comment' });
-  await useCase.reply({ ...seriesTarget, content: 'Reply', parentId: 7 });
-  await useCase.load({ type: 'Book', id: 12, page: 1 });
+  await useCase.load({ ...bookTarget, page: 1 });
+  await useCase.load({ ...bookTarget, page: 2 });
+  await useCase.post({ ...bookTarget, content: 'Root comment' });
+  await useCase.reply({ ...bookTarget, content: 'Reply', parentId: 7 });
 
   assert.deepEqual(calls, [
-    ['load', { ...seriesTarget, page: 1 }],
-    ['post', { ...seriesTarget, content: 'Root comment' }],
-    ['reply', { ...seriesTarget, content: 'Reply', parentId: 7 }],
-    ['load', { type: 'Book', id: 12, page: 1 }],
+    ['load', { ...bookTarget, page: 1 }],
+    ['load', { ...bookTarget, page: 2 }],
+    ['post', { ...bookTarget, content: 'Root comment' }],
+    ['reply', { ...bookTarget, content: 'Reply', parentId: 7 }],
   ]);
-  assert.throws(
-    () => useCase.load({ type: 'Series', id: 1, seriesTitle: 'Comic series', page: 1 }),
-    /must be zero/i,
-  );
-  assert.throws(
-    () => useCase.load({ type: 'Series', id: 0, seriesTitle: ' ', page: 1 }),
-    /series title is required/i,
-  );
   assert.throws(
     () => useCase.load({ type: 'Book', id: 0, page: 1 }),
     /valid comment target id/i,
@@ -549,6 +658,34 @@ test('avatar sources round-trip Web-Master URL, QQ, and QQ group modes', () => {
   assert.throws(() => resolveAvatarUrl('url', 'http://cdn.example/avatar.png'), /valid HTTPS/);
 });
 
+test('point log use case selects and validates paged logs', async () => {
+  const calls = [];
+  const useCase = createPointLogUseCase({
+    async getPointLog(page, size) {
+      calls.push({ kind: 'experience', page, size });
+      return { page, totalPages: 2, items: [] };
+    },
+    async getCoinLog(page, size) {
+      calls.push({ kind: 'coin', page, size });
+      return { page, totalPages: 1, items: [] };
+    },
+  });
+
+  assert.deepEqual(await useCase.loadPage('experience', 1), {
+    page: 1, totalPages: 2, items: [],
+  });
+  assert.deepEqual(await useCase.loadPage('coin', 2, 10), {
+    page: 2, totalPages: 1, items: [],
+  });
+  assert.deepEqual(calls, [
+    { kind: 'experience', page: 1, size: 20 },
+    { kind: 'coin', page: 2, size: 10 },
+  ]);
+  assert.throws(() => useCase.loadPage('invalid', 1), /valid point log kind/);
+  assert.throws(() => useCase.loadPage('coin', 0), /valid point log page/);
+  assert.throws(() => useCase.loadPage('coin', 1, 25), /Page size/);
+});
+
 test('profile repository publishes refreshed avatar and check-in state', async () => {
   let profile = {
     id: 9,
@@ -562,6 +699,8 @@ test('profile repository publishes refreshed avatar and check-in state', async (
     growth: {
       experience: 10,
       coin: 0,
+      comicQuota: 0,
+      comicQuotaToday: 0,
       level: 1,
       growthLevel: 1,
       currentLevelExperience: 0,
@@ -573,6 +712,10 @@ test('profile repository publishes refreshed avatar and check-in state', async (
   const useCase = createProfileUseCase({
     async getMyProfile() { return structuredClone(profile); },
     async setAvatar(url) { profile = { ...profile, avatarUrl: url }; },
+    async resetInviteCode() {
+      profile = { ...profile, inviteCode: 'NEW-CODE' };
+      return { inviteCode: 'NEW-CODE' };
+    },
     async checkIn() {
       profile = {
         ...profile,
@@ -592,7 +735,317 @@ test('profile repository publishes refreshed avatar and check-in state', async (
   assert.equal(outcome.result.reward, 5);
   assert.equal(outcome.profile.growth.signedToday, true);
   assert.equal(useCase.getSnapshot().growth.signInStreak, 1);
+  const growthDelta = useCase.applyGrowth({
+    ...useCase.getSnapshot().growth,
+    experience: 22,
+    coin: 3,
+  });
+  assert.deepEqual(growthDelta, { experienceDelta: 7, coinDelta: 3 });
+  assert.equal(useCase.getSnapshot().growth.experience, 22);
+  assert.equal(useCase.getSnapshot().growth.coin, 3);
+  const reset = await useCase.resetInviteCode();
+  assert.equal(reset.result.inviteCode, 'NEW-CODE');
+  assert.equal(reset.profile.inviteCode, 'NEW-CODE');
+  assert.equal(useCase.getSnapshot().inviteCode, 'NEW-CODE');
+  assert.equal(published.length, 5);
+});
+
+test('profile growth wins over a stale in-flight profile load', async () => {
+  const initial = {
+    id: 1,
+    userName: 'reader',
+    avatarUrl: '',
+    email: '',
+    inviteCode: '',
+    groupName: 'Member',
+    unreadNotificationCount: 0,
+    registeredAt: null,
+    growth: {
+      experience: 10,
+      coin: 2,
+      comicQuota: 0,
+      comicQuotaToday: 0,
+      level: 1,
+      growthLevel: 1,
+      currentLevelExperience: 0,
+      nextLevelExperience: 100,
+      signInStreak: 0,
+      signedToday: false,
+    },
+  };
+  const staleLoad = deferred();
+  let calls = 0;
+  const useCase = createProfileUseCase({
+    async getMyProfile() {
+      calls += 1;
+      return calls === 1 ? structuredClone(initial) : staleLoad.promise;
+    },
+  });
+
+  await useCase.load();
+  const firstLoad = useCase.load();
+  const secondLoad = useCase.load();
+  await nextTask();
+  assert.equal(calls, 2);
+  assert.equal(useCase.applyGrowth({
+    ...initial.growth,
+    experience: 20,
+    coin: 4,
+  }).experienceDelta, 10);
+  staleLoad.resolve(structuredClone(initial));
+  await Promise.all([firstLoad, secondLoad]);
+  assert.equal(useCase.getSnapshot().growth.experience, 20);
+  assert.equal(useCase.getSnapshot().growth.coin, 4);
+});
+
+test('public profile use case validates, deduplicates, caches, and retries loads', async () => {
+  let now = 1_000;
+  let calls = 0;
+  const first = deferred();
+  const summary = {
+    id: 9,
+    userName: 'reader',
+    avatarUrl: '',
+    role: 'Member',
+    level: 3,
+    registeredAt: '2026-01-02T00:00:00.000Z',
+    bookCount: 1,
+    communityThreadCount: 2,
+    communityReplyCount: 3,
+    commentCount: 4,
+  };
+  const useCase = createPublicProfileUseCase({
+    async getPublicUserSummary(userId) {
+      calls += 1;
+      assert.equal(userId, 9);
+      if (calls === 1) return first.promise;
+      return summary;
+    },
+  }, () => now);
+
+  assert.throws(() => useCase.load(0), /valid user id/);
+  const pendingA = useCase.load(9);
+  const pendingB = useCase.load(9);
+  assert.equal(pendingA, pendingB);
+  assert.equal(calls, 1);
+  first.resolve(summary);
+  assert.equal(await pendingA, summary);
+
+  assert.equal(await useCase.load(9), summary);
+  assert.equal(calls, 1);
+  now += PUBLIC_USER_SUMMARY_CACHE_MILLISECONDS + 1;
+  assert.equal(await useCase.load(9), summary);
+  assert.equal(calls, 2);
+
+  let retryCalls = 0;
+  const retrying = createPublicProfileUseCase({
+    async getPublicUserSummary() {
+      retryCalls += 1;
+      if (retryCalls === 1) throw new Error('offline');
+      return summary;
+    },
+  });
+  await assert.rejects(retrying.load(9), /offline/);
+  assert.equal(await retrying.load(9), summary);
+  assert.equal(retryCalls, 2);
+});
+
+test('shop repository serializes purchases and publishes authoritative snapshots', async () => {
+  let coin = 100;
+  let owned = 0;
+  let monthlyPurchased = 0;
+  let failNextShopLoad = false;
+  const purchaseCalls = [];
+  const firstPurchase = deferred();
+  const api = {
+    async getShop() {
+      if (failNextShopLoad) {
+        failNextShopLoad = false;
+        throw new Error('shop refresh failed');
+      }
+      return {
+        coin,
+        items: [{
+          key: 'sign_makeup',
+          name: '补签卡',
+          description: '补签一天',
+          image: '/images/sign-makeup.png',
+          price: 20,
+          owned,
+          monthlyLimit: 5,
+          monthlyPurchased,
+        }],
+      };
+    },
+    async getMyShopItems() {
+      return {
+        items: owned === 0 ? [] : [{
+          key: 'sign_makeup',
+          name: '补签卡',
+          description: '补签一天',
+          image: '/images/sign-makeup.png',
+          quantity: owned,
+        }],
+      };
+    },
+    async getSignInCalendar(year, month) {
+      assert.equal(year, 2026);
+      assert.equal(month, 8);
+      return {
+        year,
+        month,
+        days: [{ date: '2026-08-01', streak: 7, reward: 5 }],
+      };
+    },
+    async buyShopItem(request) {
+      purchaseCalls.push(request);
+      if (request.key === 'fail') throw new Error('purchase failed');
+      if (purchaseCalls.length === 1) await firstPurchase.promise;
+      coin -= 20 * request.quantity;
+      owned += request.quantity;
+      monthlyPurchased += request.quantity;
+      return {
+        key: request.key,
+        owned,
+        coin,
+        cost: 20 * request.quantity,
+        monthlyPurchased,
+      };
+    },
+    async useSignMakeupCard(request) {
+      assert.equal(request.date, '2026-08-01');
+      owned -= 1;
+      return {
+        date: request.date,
+        streak: 8,
+        reward: 12,
+        coinReward: 3,
+        owned,
+      };
+    },
+  };
+  const useCase = createShopUseCase(api);
+  const published = [];
+  useCase.subscribe((snapshot) => published.push(snapshot));
+
+  const initial = await useCase.load();
+  assert.equal(initial.coin, 100);
+  assert.deepEqual(initial.ownedItems, []);
+
+  const calendar = await useCase.loadSignInCalendar(2026, 8);
+  assert.deepEqual(calendar.days, [{ date: '2026-08-01', streak: 7, reward: 5 }]);
+
+  const first = useCase.buy(' sign_makeup ');
+  const second = useCase.buy('sign_makeup');
+  await Promise.resolve();
+  assert.deepEqual(purchaseCalls, [{ key: 'sign_makeup', quantity: 1 }]);
+  firstPurchase.resolve();
+  await Promise.all([first, second]);
+
+  assert.deepEqual(purchaseCalls, [
+    { key: 'sign_makeup', quantity: 1 },
+    { key: 'sign_makeup', quantity: 1 },
+  ]);
+  assert.equal(useCase.getSnapshot().coin, 60);
+  assert.equal(useCase.getSnapshot().ownedItems[0].quantity, 2);
+  assert.equal(published.length, 2);
+
+  failNextShopLoad = true;
+  const refreshFallback = await useCase.buy('sign_makeup');
+  assert.equal(refreshFallback.coin, 40);
+  assert.equal(refreshFallback.items[0].owned, 3);
+  assert.equal(refreshFallback.ownedItems[0].quantity, 3);
+  assert.equal(useCase.getSnapshot(), refreshFallback);
   assert.equal(published.length, 3);
+
+  const makeup = await useCase.useSignMakeupCard('2026-08-01');
+  assert.equal(makeup.result.streak, 8);
+  assert.equal(makeup.result.owned, 2);
+  assert.equal(makeup.snapshot.ownedItems[0].quantity, 2);
+  assert.equal(useCase.getSnapshot(), makeup.snapshot);
+  assert.equal(published.length, 4);
+
+  const confirmed = useCase.getSnapshot();
+  await assert.rejects(useCase.buy('fail'), /purchase failed/);
+  assert.equal(useCase.getSnapshot(), confirmed);
+  assert.throws(() => useCase.buy('  '), /item key/);
+  assert.throws(() => useCase.buy('sign_makeup', 0), /positive/);
+  await assert.rejects(useCase.useSignMakeupCard('2026/08/01'), /yyyy-MM-dd/);
+  await assert.rejects(useCase.useSignMakeupCard('2026-02-31'), /yyyy-MM-dd/);
+
+  useCase.reset();
+  assert.equal(useCase.getSnapshot(), null);
+  assert.equal(published.at(-1), null);
+});
+
+test('shop repository preserves confirmed quota-card state when refresh fails', async () => {
+  let quota = 25;
+  let quotaOwned = 2;
+  let failNextShopLoad = false;
+  let failQuotaUse = false;
+  const api = {
+    async getShop() {
+      if (failNextShopLoad) {
+        failNextShopLoad = false;
+        throw new Error('shop refresh failed');
+      }
+      return {
+        coin: 100,
+        items: [{
+          key: 'comic_quota_50',
+          name: '漫画额度卡',
+          description: '增加漫画额度',
+          image: '/images/comic-quota.png',
+          price: 20,
+          owned: quotaOwned,
+          monthlyLimit: null,
+          monthlyPurchased: 0,
+        }],
+      };
+    },
+    async getMyShopItems() {
+      return {
+        items: quotaOwned > 0 ? [{
+          key: 'comic_quota_50',
+          name: '漫画额度卡',
+          description: '增加漫画额度',
+          image: '/images/comic-quota.png',
+          quantity: quotaOwned,
+        }] : [],
+      };
+    },
+    async useComicQuotaCard() {
+      if (failQuotaUse) throw new Error('quota use failed');
+      quotaOwned -= 1;
+      quota += 50;
+      return {
+        key: 'comic_quota_50',
+        granted: 50,
+        quota,
+        owned: quotaOwned,
+      };
+    },
+  };
+  const useCase = createShopUseCase(api);
+  await assert.rejects(useCase.useComicQuotaCard(), /shop must be loaded/);
+  await useCase.load();
+
+  failNextShopLoad = true;
+  const fallback = await useCase.useComicQuotaCard();
+  assert.equal(fallback.result.quota, 75);
+  assert.equal(fallback.snapshot.items[0].owned, 1);
+  assert.equal(fallback.snapshot.ownedItems[0].quantity, 1);
+  assert.equal(useCase.getSnapshot(), fallback.snapshot);
+
+  const refreshed = await useCase.useComicQuotaCard();
+  assert.equal(refreshed.result.quota, 125);
+  assert.equal(refreshed.snapshot.items[0].owned, 0);
+  assert.deepEqual(refreshed.snapshot.ownedItems, []);
+
+  failQuotaUse = true;
+  const confirmed = useCase.getSnapshot();
+  await assert.rejects(useCase.useComicQuotaCard(), /quota use failed/);
+  assert.equal(useCase.getSnapshot(), confirmed);
 });
 
 test('shelf repository publishes one shared snapshot after load and save', async () => {
@@ -1073,6 +1526,26 @@ test('Community use case validates input and forwards cancellation and mutations
       calls.push(['createReply', request]);
       return Promise.resolve({ id: 6 });
     },
+    getCommunityThreadEditInfo(id, format) {
+      calls.push(['editInfo', id, format]);
+      return Promise.resolve({ id, format });
+    },
+    updateCommunityThread(request) {
+      calls.push(['updateThread', request]);
+      return Promise.resolve({ id: request.threadId });
+    },
+    deleteCommunityThread(id) {
+      calls.push(['deleteThread', id]);
+      return Promise.resolve({ id });
+    },
+    deleteCommunityReply(id) {
+      calls.push(['deleteReply', id]);
+      return Promise.resolve({ id, removed: 1 });
+    },
+    setCommunityThreadLocked(id, locked) {
+      calls.push(['threadLocked', id, locked]);
+      return Promise.resolve({ id, locked });
+    },
     toggleCommunityThreadLike(id) {
       calls.push(['threadLike', id]);
       return Promise.resolve({ liked: true, likes: 1 });
@@ -1101,9 +1574,21 @@ test('Community use case validates input and forwards cancellation and mutations
     contentHtml: '  <p>This body is definitely long enough.</p>  ',
   });
   await useCase.createReply({ threadId: 3, content: '  reply  ', replyToId: 4 });
+  await useCase.loadThreadEditInfo(3);
+  await useCase.updateThread({
+    threadId: 3,
+    boardKey: ' general ',
+    subCategoryKey: ' news ',
+    title: '  Valid title  ',
+    contentText: '  This body is definitely long enough.  ',
+    contentHtml: '  <p>This body is definitely long enough.</p>  ',
+  });
+  await useCase.deleteThread(3);
+  await useCase.deleteReply(4);
   await useCase.toggleThreadLike(3);
   await useCase.toggleThreadFavorite(3);
   await useCase.toggleReplyLike(4);
+  await useCase.setThreadLocked(3, true);
 
   assert.equal(calls[0][2].signal, signal);
   assert.equal(calls[2][2].signal, signal);
@@ -1114,7 +1599,24 @@ test('Community use case validates input and forwards cancellation and mutations
     contentHtml: '<p>This body is definitely long enough.</p>',
   });
   assert.deepEqual(calls[6][1], { threadId: 3, content: 'reply', replyToId: 4 });
-  assert.throws(() => useCase.loadThread({ threadId: 0 }), /valid Community thread id/i);
+  assert.deepEqual(calls[7], ['editInfo', 3, 'html']);
+  assert.deepEqual(calls[8][1], {
+    threadId: 3,
+    boardKey: 'general',
+    subCategoryKey: 'news',
+    title: 'Valid title',
+    contentHtml: '<p>This body is definitely long enough.</p>',
+  });
+  assert.deepEqual(calls[9], ['deleteThread', 3]);
+  assert.deepEqual(calls[10], ['deleteReply', 4]);
+  assert.deepEqual(calls[11], ['threadLike', 3]);
+  assert.deepEqual(calls[12], ['threadFavorite', 3]);
+  assert.deepEqual(calls[13], ['replyLike', 4]);
+  assert.deepEqual(calls[14], ['threadLocked', 3, true]);
+  assert.throws(() => useCase.setThreadLocked(0, true), /valid Community thread id/i);
+  assert.throws(() => useCase.setThreadLocked(3, 'true'), /valid thread lock state/i);
+  assert.throws(() => useCase.deleteThread(0), /valid Community thread id/i);
+  assert.throws(() => useCase.deleteReply(0), /valid Community reply id/i);
   await assert.rejects(() => useCase.createThread({
     boardKey: 'all',
     title: 'short',

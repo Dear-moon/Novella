@@ -457,7 +457,7 @@ function toCommentPalette(colors: ReturnType<typeof useAppTheme>['colors']): Com
   return {
     accent: colors.accent,
     error: colors.error,
-    highlightBackground: colors.primaryContainer,
+    highlightColor: colors.primaryContainer,
     label: colors.label,
     onSurfaceVariant: colors.secondaryLabel,
     separator: colors.separator,

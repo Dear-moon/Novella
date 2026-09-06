@@ -44,11 +44,8 @@ export function BookCommentsScreen({ bookId, target: commentTarget }: BookCommen
   const stableCommentTarget = useMemo<CommentTarget>(() => ({
     id: commentTarget.id,
     type: commentTarget.type,
-    ...(commentTarget.seriesTitle === undefined
-      ? {}
-      : { seriesTitle: commentTarget.seriesTitle }),
-  }), [commentTarget.id, commentTarget.seriesTitle, commentTarget.type]);
-  const {
+ }), [commentTarget.id, commentTarget.type]);
+ const {
     deleteComment,
     error,
     isLoading,
@@ -202,7 +199,7 @@ function toCommentThreadPalette(palette: BookDetailPalette): CommentThreadPalett
   return {
     accent: palette.primary,
     error: palette.error,
-    highlightBackground: palette.primaryContainer,
+    highlightColor: palette.primaryContainer,
     label: palette.onSurface,
     onSurfaceVariant: palette.onSurfaceVariant,
     separator: palette.outlineVariant,
