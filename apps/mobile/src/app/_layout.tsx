@@ -19,6 +19,7 @@ import { ClientSessionFeedback } from '@/components/client-session-feedback';
 import { ClientRealtimeEvents } from '@/components/client-realtime-events';
 import { AppLocalizationProvider } from '@/localization/localization-provider';
 import { NativeAlertHost } from '@/components/native-alert-dialog';
+import { PublicProfileHost } from '@/components/public-profile-card';
 import { useAuthentication } from '@/hooks/use-authentication';
 import { autoCheckInOnLaunch } from '@/services/auto-check-in';
 import { hasStoredSession, startClient } from '@/services/client';
@@ -346,6 +347,7 @@ function RootLayoutContent() {
        <ClientSessionFeedback sessionDecided={sessionDecided} />
         <ClientRealtimeEvents />
        <NativeAlertHost />
+        <PublicProfileHost />
       </BookDetailThemeProvider>
         </ThemeProvider>
       </HeroUINativeProvider>

@@ -46,11 +46,9 @@ export default function SettingsStackLayout() {
       <Stack.Screen
         name="point-logs"
         options={{
+          ...badgeSheetOptions,
           headerShown: false,
-          presentation: 'formSheet',
-          sheetAllowedDetents: [0.5, 1],
-          sheetGrabberVisible: true,
-          sheetInitialDetentIndex: 0,
+          presentation: isAndroid ? 'transparentModal' : 'formSheet',
           title: t('pointLogs.experienceTitle'),
         }}
       />

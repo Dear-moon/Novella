@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 import type { ReactNode } from 'react';
 import {
   FlatList,
+  Platform,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -26,6 +27,7 @@ import {
   PaperProvider,
   Surface,
 } from 'react-native-paper';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { CommunityThreadReply } from '@novella/api-client';
 
@@ -61,6 +63,7 @@ export function CommunityThreadScreen({
   threadId: number;
 }) {
   const styles = useCommunityThreadStyles();
+  const insets = useSafeAreaInsets();
   const { colorScheme, colors } = useAppTheme();
   const { t } = useTranslation('community');
   const { t: tCommon } = useTranslation('common');
@@ -397,7 +400,10 @@ export function CommunityThreadScreen({
             }
             ListFooterComponent={footer}
             ListHeaderComponent={header}
-            contentContainerStyle={styles.content}
+            contentContainerStyle={[
+              styles.content,
+              Platform.OS === 'android' ? { paddingTop: insets.top } : null,
+            ]}
             contentInsetAdjustmentBehavior="automatic"
             data={rows}
             keyExtractor={(item) => item.key}
