@@ -4,7 +4,8 @@ import {
   IconRefresh,
 } from '@tabler/icons-react-native';
 import { router, Stack, useFocusEffect } from 'expo-router';
-import { Card, Skeleton } from 'heroui-native';
+import { Card } from 'panelui-native/components/card';
+import { Skeleton } from 'panelui-native/components/skeleton';
 import { marked } from 'marked';
 import { memo, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -357,8 +358,8 @@ const AnnouncementArticle = memo(function AnnouncementArticle({
   });
 
   return (
-    <Card style={styles.articleCard} variant="secondary">
-      <Card.Body style={styles.articleBody}>
+    <Card style={styles.articleCard}>
+      <Card.Content className="p-0" style={styles.articleBody}>
         {showHeader ? (
           <>
             <Text selectable style={styles.articleTitle}>{title}</Text>
@@ -374,7 +375,7 @@ const AnnouncementArticle = memo(function AnnouncementArticle({
           lineHeight={25.6}
           textColor={colors.label as string}
         />
-      </Card.Body>
+      </Card.Content>
     </Card>
   );
 });
@@ -383,19 +384,15 @@ function AnnouncementDetailSkeleton() {
   const styles = useAnnouncementDetailStyles();
   const { colors } = useAppTheme();
   return (
-    <Card
-      accessibilityElementsHidden
-      style={styles.articleCard}
-      variant="secondary"
-    >
-      <Card.Body style={styles.skeletonBody}>
+    <Card accessibilityElementsHidden style={styles.articleCard}>
+      <Card.Content className="p-0" style={styles.skeletonBody}>
         <Skeleton style={[styles.skeletonTitle, { backgroundColor: colors.card }]} />
         <Skeleton style={[styles.skeletonMeta, { backgroundColor: colors.card }]} />
         <Skeleton style={[styles.skeletonLine, { backgroundColor: colors.card }]} />
         <Skeleton style={[styles.skeletonLine, { backgroundColor: colors.card }]} />
         <Skeleton style={[styles.skeletonShort, { backgroundColor: colors.card }]} />
         <Skeleton style={[styles.skeletonLine, { backgroundColor: colors.card }]} />
-      </Card.Body>
+      </Card.Content>
     </Card>
   );
 }

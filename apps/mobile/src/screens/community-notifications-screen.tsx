@@ -7,7 +7,9 @@ import {
   IconInfoCircle,
 } from '@tabler/icons-react-native';
 import { router, Stack } from 'expo-router';
-import { Button, Skeleton, Spinner } from 'heroui-native';
+import { Button } from 'panelui-native/components/button';
+import { Skeleton } from 'panelui-native/components/skeleton';
+import { Spinner } from 'panelui-native/components/spinner';
 import { memo, useCallback } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -148,7 +150,7 @@ export function CommunityNotificationsScreen() {
               <CommunityErrorState description={state.error} onRetry={() => void loadMore()} title={t('notifications.loadMoreErrorTitle')} />
             ) : state.page < state.totalPages ? (
               <Button onPress={() => void loadMore()} variant="secondary">
-                <Button.Label>{t('actions.loadMore')}</Button.Label>
+                {t('actions.loadMore')}
               </Button>
             ) : null
           }
@@ -189,48 +191,32 @@ const NotificationSkeleton = memo(function NotificationSkeleton() {
       <View style={styles.cardBody}>
         <View style={styles.topRow}>
           <Skeleton
-            animation={{ entering: false, exiting: false }}
             style={styles.skeletonAvatar}
-            variant="shimmer"
           />
           <View style={styles.skeletonCopy}>
             <Skeleton
-              animation={{ entering: false, exiting: false }}
               style={styles.skeletonActor}
-              variant="shimmer"
             />
             <Skeleton
-              animation={{ entering: false, exiting: false }}
               style={styles.skeletonAction}
-              variant="shimmer"
             />
           </View>
           <Skeleton
-            animation={{ entering: false, exiting: false }}
             style={styles.skeletonIcon}
-            variant="shimmer"
           />
         </View>
         <Skeleton
-          animation={{ entering: false, exiting: false }}
           style={styles.skeletonTitle}
-          variant="shimmer"
         />
         <Skeleton
-          animation={{ entering: false, exiting: false }}
           style={styles.skeletonPreview}
-          variant="shimmer"
         />
         <View style={styles.metaRow}>
           <Skeleton
-            animation={{ entering: false, exiting: false }}
             style={styles.skeletonChip}
-            variant="shimmer"
           />
           <Skeleton
-            animation={{ entering: false, exiting: false }}
             style={styles.skeletonTime}
-            variant="shimmer"
           />
         </View>
       </View>

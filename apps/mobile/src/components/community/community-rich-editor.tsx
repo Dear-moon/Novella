@@ -7,7 +7,7 @@ import {
   IconStrikethrough,
   IconUnderline,
 } from '@tabler/icons-react-native';
-import { Button } from 'heroui-native';
+import { Button } from 'panelui-native/components/button';
 import {
   forwardRef,
   useImperativeHandle,
@@ -25,6 +25,7 @@ import {
 import { useAppTheme } from '@/theme/app-theme';
 
 export interface CommunityRichEditorHandle {
+  blur(): void;
   focus(): void;
   getHtml(): Promise<string>;
 }
@@ -33,6 +34,8 @@ interface CommunityRichEditorProps {
   editable?: boolean;
   initialHtml?: string;
   onTextChange(text: string): void;
+  onTouchEnd?(): void;
+  onTouchStart?(): void;
   placeholder?: string;
 }
 
@@ -53,6 +56,8 @@ export const CommunityRichEditor = forwardRef<
     editable = true,
     initialHtml = '',
     onTextChange,
+    onTouchEnd,
+    onTouchStart,
     placeholder,
   },
   ref,
@@ -63,6 +68,9 @@ export const CommunityRichEditor = forwardRef<
   const [formatState, setFormatState] = useState<OnChangeStateEvent | null>(null);
 
   useImperativeHandle(ref, () => ({
+    blur() {
+      editorRef.current?.blur();
+    },
     focus() {
       editorRef.current?.focus();
     },
@@ -131,7 +139,11 @@ export const CommunityRichEditor = forwardRef<
   ];
 
   return (
-    <View style={[styles.container, { borderColor: colors.separator }]}>
+    <View
+      onTouchEnd={onTouchEnd}
+      onTouchStart={onTouchStart}
+      style={[styles.container, { borderColor: colors.separator }]}
+    >
       <ScrollView
         contentContainerStyle={styles.toolbar}
         horizontal
@@ -144,14 +156,13 @@ export const CommunityRichEditor = forwardRef<
             <Button
               accessibilityLabel={action.label}
               accessibilityState={{ disabled: !editable || action.blocked, selected: action.active }}
-              isDisabled={!editable || action.blocked}
-              isIconOnly
+              disabled={!editable || action.blocked}
               key={action.id}
               onPress={() => {
                 const editor = editorRef.current;
                 if (editor) action.run(editor);
               }}
-              size="sm"
+              size="icon"
               style={action.active ? { backgroundColor: colors.primaryContainer } : undefined}
               variant={action.active ? 'secondary' : 'ghost'}
             >

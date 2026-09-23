@@ -1,6 +1,6 @@
 import '../global.css';
 
-import { HeroUINativeProvider } from 'heroui-native';
+import { PanelUIProvider } from 'panelui-native';
 import { ToastProvider, toast } from '@celia-sh/react-native-pretty-toast';
 import {
   DarkTheme,
@@ -123,7 +123,7 @@ function RootLayoutContent() {
   }
   return (
     <>
-      <HeroUINativeProvider config={heroUIConfig}>
+      <PanelUIProvider>
         <ThemeProvider value={navigationTheme}>
       <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
       <BookDetailThemeProvider>
@@ -350,15 +350,10 @@ function RootLayoutContent() {
         <PublicProfileHost />
       </BookDetailThemeProvider>
         </ThemeProvider>
-      </HeroUINativeProvider>
+      </PanelUIProvider>
     </>
   );
 }
-
-const heroUIConfig = {
-  devInfo: { stylingPrinciples: false },
-  toast: 'disabled' as const,
-};
 
 const styles = StyleSheet.create({
   gestureRoot: { flex: 1 },

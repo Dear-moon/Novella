@@ -58,6 +58,14 @@ class NovellaUiModule : Module() {
       }
     }
 
+    ExpoUIView<ReaderProgressBarProps>("ReaderProgressBar") {
+      val onProgressChange by Event<ReaderProgressChangeEvent>()
+
+      Content { props ->
+        ReaderProgressBarContent(props) { onProgressChange(it) }
+      }
+    }
+
     ExpoUIView<SearchBarProps>("SearchBar") {
       val onQueryChange by Event<SearchTextEvent>()
       val onSearch by Event<SearchTextEvent>()

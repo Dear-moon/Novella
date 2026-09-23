@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { SkeletonGroup } from 'heroui-native';
+import { Skeleton } from 'panelui-native/components/skeleton';
 import { useTranslation } from 'react-i18next';
 import {
   useCallback,
@@ -304,7 +304,6 @@ function BookDetailContent({
         </View>
 
         <View style={styles.actions}>
-          {book.type === 'Comic' ? null : (
           <IconButton
             accessibilityLabel={isInShelf ? t('detail.removeFromShelf') : t('detail.addToShelf')}
             containerColor={isInShelf ? palette.primaryContainer : palette.surfaceContainerHighest}
@@ -321,7 +320,6 @@ function BookDetailContent({
             size={25}
             style={styles.shelfButton}
           />
-          )}
 
           <Button
             accessibilityLabel={resumeChapter
@@ -769,23 +767,14 @@ function BookHeroContent({
         </View>
         <View pointerEvents="box-none" style={styles.heroText}>
           {isLoading ? (
-            <SkeletonGroup
-              animation={{
-                shimmer: {
-                  duration: 1_400,
-                  highlightColor: shimmerHighlightColor(palette.surfaceContainerHighest),
-                },
-              }}
-              isLoading
-              variant="shimmer"
-            >
+            <>
               <View style={styles.loadingTextGroup}>
                 {title ? (
                   <Text numberOfLines={4} style={[styles.bookTitle, { color: palette.onSurface }]}>
                     {book.title}
                   </Text>
                 ) : (
-                  <SkeletonGroup.Item
+                  <Skeleton
                     style={[
                       styles.loadingBlock,
                       styles.loadingTitle,
@@ -793,7 +782,7 @@ function BookHeroContent({
                     ]}
                   />
                 )}
-                <SkeletonGroup.Item
+                <Skeleton
                   style={[
                     styles.loadingBlock,
                     styles.loadingAuthor,
@@ -801,7 +790,7 @@ function BookHeroContent({
                   ]}
                 />
               </View>
-            </SkeletonGroup>
+            </>
           ) : title ? (
             <Pressable
               accessibilityLabel={titleSearchAccessibilityLabel}
@@ -876,41 +865,19 @@ function BookDetailBodyLoading({
 }) {
   const block = { backgroundColor: palette.surfaceContainerHighest };
   return (
-    <SkeletonGroup
-      animation={{
-        shimmer: {
-          duration: 1_400,
-          highlightColor: shimmerHighlightColor(palette.surfaceContainerHighest),
-        },
-      }}
-      isLoading
-      variant="shimmer"
-    >
+    <>
       <View style={[styles.loadingBody, { paddingHorizontal: horizontalPadding }]}>
         <View style={styles.loadingChipRow}>
-          <SkeletonGroup.Item style={[styles.loadingBlock, styles.loadingChip, block]} />
-          <SkeletonGroup.Item style={[styles.loadingBlock, styles.loadingChip, block]} />
-          <SkeletonGroup.Item style={[styles.loadingBlock, styles.loadingChipWide, block]} />
+          <Skeleton style={[styles.loadingBlock, styles.loadingChip, block]} />
+          <Skeleton style={[styles.loadingBlock, styles.loadingChip, block]} />
+          <Skeleton style={[styles.loadingBlock, styles.loadingChipWide, block]} />
         </View>
-        <SkeletonGroup.Item style={[styles.loadingBlock, styles.loadingAction, block]} />
-        <SkeletonGroup.Item style={[styles.loadingBlock, styles.loadingParagraph, block]} />
-        <SkeletonGroup.Item style={[styles.loadingBlock, styles.loadingUpdate, block]} />
+        <Skeleton style={[styles.loadingBlock, styles.loadingAction, block]} />
+        <Skeleton style={[styles.loadingBlock, styles.loadingParagraph, block]} />
+        <Skeleton style={[styles.loadingBlock, styles.loadingUpdate, block]} />
       </View>
-    </SkeletonGroup>
+    </>
   );
-}
-
-/** Pick a shimmer highlight that reads on the detail palette: a bright white
- * sweep on light blocks, a dim one on dark/OLED blocks. */
-function shimmerHighlightColor(blockColor: string): string {
-  const match = /^#([0-9a-f]{6})$/i.exec(blockColor);
-  if (!match) return 'rgba(255, 255, 255, 0.5)';
-  const value = Number.parseInt(match[1] ?? '', 16);
-  const red = (value >> 16) & 0xff;
-  const green = (value >> 8) & 0xff;
-  const blue = value & 0xff;
-  const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
-  return luminance > 120 ? 'rgba(255, 255, 255, 0.55)' : 'rgba(255, 255, 255, 0.16)';
 }
 
 function BookDetailError({

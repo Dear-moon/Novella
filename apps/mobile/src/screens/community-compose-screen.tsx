@@ -1,12 +1,7 @@
 import { router, Stack } from 'expo-router';
-import {
-  Chip,
-  FieldError,
-  Input,
-  Label,
-  Spinner,
-  TextField,
-} from 'heroui-native';
+import { Chip } from 'panelui-native/components/chip';
+import { Input } from 'panelui-native/components/input';
+import { Spinner } from 'panelui-native/components/spinner';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -248,14 +243,12 @@ export function CommunityComposeScreen({
               <View style={styles.chips}>
                 {boards.map((board) => (
                   <Chip
-                    accessibilityState={{ selected: board.key === boardKey }}
-                    color={board.key === boardKey ? 'accent' : 'default'}
                     key={board.key}
                     onPress={() => {
                       setBoardKey(board.key);
                       setSubCategoryKey('');
                     }}
-                    variant={board.key === boardKey ? 'primary' : 'soft'}
+                    selected={board.key === boardKey}
                   >
                     {board.title}
                   </Chip>
@@ -270,11 +263,9 @@ export function CommunityComposeScreen({
                 <View style={styles.chips}>
                   {selectedBoard.subCategories.map((category) => (
                     <Chip
-                      accessibilityState={{ selected: category.key === subCategoryKey }}
-                      color={category.key === subCategoryKey ? 'accent' : 'default'}
                       key={category.key}
                       onPress={() => setSubCategoryKey(category.key)}
-                      variant={category.key === subCategoryKey ? 'primary' : 'soft'}
+                      selected={category.key === subCategoryKey}
                     >
                       {category.label}
                     </Chip>
@@ -284,22 +275,20 @@ export function CommunityComposeScreen({
               </View>
             ) : null}
 
-            <TextField isInvalid={title.length > 0 && title.trim().length < 6}>
-              <Label>
-                <Label.Text styles={{ text: styles.fieldHeading }}>{t('compose.title')}</Label.Text>
-              </Label>
-              <Input
-                editable={!publishing}
-                maxLength={60}
-                onChangeText={setTitle}
-                placeholder={t('compose.titlePlaceholder')}
-                value={title}
-              />
-              <View style={styles.counterRow}>
-                <FieldError>{t('compose.titleMinimum')}</FieldError>
-                <Text style={styles.counter}>{title.length}/60</Text>
-              </View>
-            </TextField>
+            <Input
+              editable={!publishing}
+              label={t('compose.title')}
+              maxLength={60}
+              onChangeText={setTitle}
+              placeholder={t('compose.titlePlaceholder')}
+              value={title}
+              {...(title.length > 0 && title.trim().length < 6
+                ? { errorMessage: t('compose.titleMinimum') }
+                : {})}
+            />
+            <View style={styles.counterRow}>
+              <Text style={styles.counter}>{title.length}/60</Text>
+            </View>
 
             <View style={styles.fieldGroup}>
               <View style={styles.counterRow}>
