@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useFocusEffect } from 'expo-router';
 
 import { ApiError } from '@novella/api-client';
-import type { BookDetail } from '@novella/api-client';
+import type { BookDetail, ShelfBookType } from '@novella/api-client';
 
 import { bookDetails, comicDetails, shelf } from '@/services/client';
 import { waitForMinimumDisplay } from '@/services/min-skeleton-display';
@@ -49,6 +49,9 @@ export function useBookDetail(
   seriesTitleHint?: string,
 ) {
   const normalizedSeriesTitleHint = seriesTitleHint?.trim() || null;
+  // Shelf entries are typed, so the detail route maps its media kind onto the
+  // shelf's own book type before any contains/toggle call.
+  const shelfBookType: ShelfBookType = type === 'Comic' ? 'COMIC' : 'NOVEL';
   const [state, setState] = useState<BookDetailState>({
     status: 'loading',
     book: null,
@@ -75,7 +78,7 @@ export function useBookDetail(
           : null);
     const [serverBook, isInShelf, cachedPosition] = await Promise.all([
      (type === 'Comic' ? comicDetails : bookDetails).load(bookId),
-     shelf.contains(bookId),
+     shelf.contains({ id: bookId, type: shelfBookType }),
      getCachedReaderPosition(bookId),
    ]);
      const seriesTitle = type === 'Comic'
@@ -110,7 +113,7 @@ export function useBookDetail(
             requiresAuth: error instanceof ApiError && error.category === 'auth',
           });
     }
-  }, [bookId, normalizedSeriesTitleHint, type]);
+  }, [bookId, normalizedSeriesTitleHint, shelfBookType, type]);
 
   useFocusEffect(useCallback(() => {
     void load();
@@ -137,7 +140,7 @@ export function useBookDetail(
         : current,
     );
     try {
-      const isInShelf = await shelf.toggleBook(bookId);
+      const isInShelf = await shelf.toggleBook({ id: bookId, type: shelfBookType });
       setState((current) =>
         current.status === 'ready'
           ? { ...current, isInShelf, isShelfLoading: false, shelfError: null }
@@ -154,7 +157,7 @@ export function useBookDetail(
           : current,
       );
     }
-  }, [bookId]);
+  }, [bookId, shelfBookType]);
 
   return {
     book: state.book,

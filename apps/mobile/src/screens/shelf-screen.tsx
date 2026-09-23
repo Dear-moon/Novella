@@ -21,9 +21,10 @@ import {
 
 import { showAlert } from '@/components/native-alert-dialog';
 
-import type { BookListItem, ShelfItem } from '@novella/api-client';
+import type { BookListItem, ShelfBookItem, ShelfItem } from '@novella/api-client';
 import {
   getShelfItemsAtPath,
+  shelfBookRefKey,
   shelfItemKey,
   type ShelfItemKey,
   type ShelfSnapshot,
@@ -103,7 +104,7 @@ export function ShelfScreen({ parents = [] }: { parents?: string[] }) {
     [selectedKeys, visibleItems],
   );
   const selectedBooks = selectedItems.filter(
-    (item): item is Extract<ShelfItem, { type: 'BOOK' }> => item.type === 'BOOK',
+    (item): item is ShelfBookItem => item.type !== 'FOLDER',
   );
   const selectedFolders = selectedItems.filter(
     (item): item is Extract<ShelfItem, { type: 'FOLDER' }> => item.type === 'FOLDER',
@@ -237,15 +238,15 @@ export function ShelfScreen({ parents = [] }: { parents?: string[] }) {
 
   const openMoveSheet = useCallback(() => {
     if (!canMove) return;
-    const bookIds = selectedBooks.map((book) => book.id);
+    const bookRefs = selectedBooks.map((book) => ({ id: book.id, type: book.type }));
     openShelfActionSession({
       destinations: moveDestinations,
       kind: 'move',
       onSelect: (destination) => {
-        if (moveBooks(bookIds, destination.path)) setSelectedKeys(new Set());
+        if (moveBooks(bookRefs, destination.path)) setSelectedKeys(new Set());
       },
       subtitle: t('shelf.moveSelectedDescription'),
-      title: t('shelf.moveSelectedTitle', { count: bookIds.length }),
+      title: t('shelf.moveSelectedTitle', { count: bookRefs.length }),
     });
     router.push('/shelf/action');
   }, [canMove, moveBooks, moveDestinations, selectedBooks, t]);
@@ -487,7 +488,11 @@ function ShelfContent({
 }) {
   const { t } = useTranslation('library');
   const styles = useShelfScreenStyles();
-  const booksById = new Map(snapshot.books.map((book) => [book.id, book]));
+  // Shelf records are keyed by typed identity so a Novel and a Comic that share
+  // a numeric id stay separate, and unresolved records stay null.
+  const booksByKey = new Map(
+    snapshot.books.map((record) => [shelfBookRefKey(record.ref), record.book]),
+  );
   const shelfCoverKeys = useMemo(() => visibleItems.map(shelfItemKey), [visibleItems]);
   const coverActivation = useScrollGridCoverActivation({
     columns,
@@ -521,11 +526,11 @@ function ShelfContent({
       const folderParents = [...parents, item.id];
       const previewBooks = snapshot.items
         .filter(
-          (child): child is Extract<ShelfItem, { type: 'BOOK' }> =>
-            child.type === 'BOOK' && sameParents(child.parents, folderParents),
+          (child): child is ShelfBookItem =>
+            child.type !== 'FOLDER' && sameParents(child.parents, folderParents),
         )
-        .map((child) => booksById.get(child.id))
-        .filter((book): book is BookListItem => book !== undefined);
+        .map((child) => booksByKey.get(shelfBookRefKey(child)))
+        .filter((book): book is BookListItem => book != null);
       const itemCount = snapshot.items.filter((child) =>
         sameParents(child.parents, folderParents),
       ).length;
@@ -547,7 +552,7 @@ function ShelfContent({
       );
     }
 
-    const book = booksById.get(item.id);
+    const book = booksByKey.get(key) ?? null;
     // The tile hands back its own book; the route id stays the shelf item id.
     const handlePress = (pressed: BookListItem) => {
       router.push({
