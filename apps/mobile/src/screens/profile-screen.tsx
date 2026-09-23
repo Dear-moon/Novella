@@ -19,6 +19,7 @@ import { formatDate } from '@/localization/formatters';
 import type { AppLocale } from '@/localization/locale';
 import { useAppLocale } from '@/localization/localization-provider';
 import { authentication } from '@/services/client';
+import { resolveGrowthLevelDescription } from '@/services/profile-growth';
 import { updateAppSettings, useAppSettings } from '@/services/settings';
 
 type CopyableProfileField = 'email' | 'inviteCode' | 'uid' | 'userName';
@@ -29,6 +30,17 @@ export function ProfileScreen() {
   const { t } = useTranslation('settings');
   const { t: tCommon } = useTranslation('common');
   const { error, profile, reload, status } = useProfile();
+  const growthDescription = profile ? resolveGrowthLevelDescription(profile.growth) : null;
+  const numberFormatter = new Intl.NumberFormat(locale);
+  const growthDescriptionText = growthDescription
+    ? growthDescription.kind === 'maxLevel'
+      ? t('profile.fields.maxLevelDescription')
+      : t('profile.fields.levelDescription', {
+          experience: numberFormatter.format(growthDescription.experience),
+          nextLevel: growthDescription.nextGrowthLevel,
+          remaining: numberFormatter.format(growthDescription.remainingExperience),
+        })
+    : null;
   const settings = useAppSettings();
   const [copiedField, setCopiedField] = useState<CopyableProfileField | null>(null);
   const [signingOut, setSigningOut] = useState(false);
@@ -138,7 +150,12 @@ export function ProfileScreen() {
           </NativeGroupedListSection>
 
           <NativeGroupedListSection title={t('profile.sections.growth')}>
-            <StaticValueRow icon="level" label={t('profile.fields.level')} value={t('profile.fields.levelValue', { level: profile.growth.level })} />
+            <StaticValueRow
+              {...(growthDescriptionText ? { description: growthDescriptionText } : {})}
+              icon="level"
+              label={t('profile.fields.level')}
+              value={t('profile.fields.levelValue', { level: profile.growth.level })}
+            />
             <StaticValueRow
               icon="experience"
               label={t('profile.fields.experience')}
